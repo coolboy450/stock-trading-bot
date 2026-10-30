@@ -67,7 +67,7 @@
 ## 2. โครงสร้างโปรเจกต์
 
 ```
-stock_bot/
+stock-trading-bot/
 ├── config/
 │   ├── settings.py                # Pydantic settings + ${ENV} expansion
 │   ├── config.example.yaml        # US stocks (Yahoo) - คัดลอกเป็น config.yaml
@@ -105,7 +105,8 @@ stock_bot/
 ## 3. การติดตั้ง
 
 ```bash
-cd stock_bot
+git clone https://github.com/coolboy450/stock-trading-bot.git
+cd stock-trading-bot
 python3 -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
@@ -123,7 +124,26 @@ echo 'DATABASE_URL=postgresql+psycopg://stockbot:stockbot@localhost:5432/stock_b
 alembic upgrade head
 ```
 
-## 4. Quick start แบบ offline
+## 4. Quick start
+
+### คำสั่งเดียว ใช้ได้ทั้ง online และ offline
+
+```bash
+python main.py demo                                      # หุ้น US (config.example.yaml)
+python main.py -c config/config.thai.example.yaml demo   # หุ้นไทย
+python main.py demo-dashboard                            # dashboard ของข้อมูล demo (เติม --offline ถ้ารันแบบ offline)
+```
+
+`demo` จะเช็คก่อนว่าต่อ Yahoo Finance ได้ไหม:
+- **ออนไลน์** → ใช้ราคาจริงจาก Yahoo
+- **ออฟไลน์** (หรือใส่ `--offline`) → ใช้ราคาจำลอง (synthetic, **ไม่ใช่ราคาจริง**) และขึ้น `MODE: OFFLINE` ให้เห็นชัด
+
+แล้วรันครบ 5 ขั้น: ดึงราคาย้อนหลัง 2 ปี → backtest ทุกกลยุทธ์ → paper trade 1 รอบ → สรุปหุ้นขึ้น/ลง → สถานะพอร์ต
+- แต่ละ config + โหมดมีฐานข้อมูลและพอร์ตของตัวเอง (`data/demo_<config>_<online|offline>.db`) ข้อมูลจริง/จำลอง และสกุลเงินต่างตลาดจึงไม่ปนกัน
+- เป็น **Paper Trading เสมอ** แม้ config จะตั้ง `mode: live`
+- รันซ้ำได้เรื่อย ๆ (เช่นวันละครั้งหลังตลาดปิด) พอร์ตเดิมจะเดินต่อ
+
+### คำสั่งแยกทีละขั้น (offline)
 
 ใช้ข้อมูลจำลอง (synthetic — **ไม่ใช่ราคาจริง**) เพื่อลองระบบทั้งหมดโดยไม่ต้องใช้อินเทอร์เน็ต:
 
@@ -193,7 +213,7 @@ python main.py schedule --run-now # รัน EOD ทันที 1 ครั้
 - **Intraday**: เปิด `scheduler.intraday.enabled: true` (เช่นทุก 5 นาที, interval `5m`) — ทำงานเฉพาะเวลาตลาดเปิด
 - ให้รันตลอดเวลาได้ด้วย `systemd`, `tmux`, `supervisor` หรือ cron (`run-once` ทุกวันหลังตลาดปิด):
   ```cron
-  30 16 * * 1-5  cd /path/stock_bot && .venv/bin/python main.py run-once >> logs/cron.log 2>&1
+  30 16 * * 1-5  cd /path/stock-trading-bot && .venv/bin/python main.py run-once >> logs/cron.log 2>&1
   ```
 
 **ขั้นที่ 9 — ปิดสถานะด้วยมือ (ถ้าต้องการ)**
@@ -332,7 +352,6 @@ JSON API: `/api/portfolio`, `/api/positions`, `/api/trades`, `/api/orders`, `/ap
 ## 14. Tests
 
 ```bash
-cd stock_bot
 pytest                       # 69 tests, offline, ~15s
 ```
 ครอบคลุม: indicators, % change/direction, ทุกกลยุทธ์ (รวม test ว่าไม่มี look-ahead), risk manager, cost model,
