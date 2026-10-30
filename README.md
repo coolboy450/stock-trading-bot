@@ -15,7 +15,7 @@
 1. [ภาพรวมสถาปัตยกรรม](#1-ภาพรวมสถาปัตยกรรม)
 2. [โครงสร้างโปรเจกต์](#2-โครงสร้างโปรเจกต์)
 3. [การติดตั้ง](#3-การติดตั้ง)
-4. [Quick start แบบ offline (ไม่ต้องใช้ API key)](#4-quick-start-แบบ-offline)
+4. [Quick start (คำสั่งเดียว online/offline)](#4-quick-start)
 5. [วิธีรัน Paper Trading แบบ step-by-step](#5-วิธีรัน-paper-trading-แบบ-step-by-step)
 6. [Backtesting](#6-backtesting)
 7. [กลยุทธ์ (Strategies)](#7-กลยุทธ์)
