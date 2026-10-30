@@ -143,6 +143,13 @@ python main.py demo-dashboard                            # dashboard ของ�
 - เป็น **Paper Trading เสมอ** แม้ config จะตั้ง `mode: live`
 - รันซ้ำได้เรื่อย ๆ (เช่นวันละครั้งหลังตลาดปิด) พอร์ตเดิมจะเดินต่อ
 
+### Windows แบบดับเบิลคลิก (ไม่ต้องพิมพ์คำสั่ง)
+
+1. ติดตั้ง [Python 3.11+](https://www.python.org/downloads/) และติ๊ก **"Add python.exe to PATH"**
+2. ดาวน์โหลดโปรเจกต์: หน้า GitHub → ปุ่ม **Code** → **Download ZIP** → แตกไฟล์ (หรือใช้ `git clone`)
+3. ดับเบิลคลิก `setup_windows.bat` (ครั้งแรกครั้งเดียว)
+4. ดับเบิลคลิก `run_demo.bat` เพื่อรัน และ `dashboard.bat` เพื่อเปิด dashboard
+
 ### Windows (PowerShell)
 
 Windows PowerShell 5.1 ไม่รองรับ `&&` ให้พิมพ์ทีละบรรทัด (ต้องติดตั้ง [Python 3.11+](https://www.python.org/downloads/) ติ๊ก "Add python.exe to PATH" และ [Git](https://git-scm.com/download/win)):
