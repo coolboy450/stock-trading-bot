@@ -96,7 +96,7 @@ stock_bot/
 ├── dashboard/                     # app.py (FastAPI) + static/index.html
 ├── utils/                         # logger, retry, market_hours
 ├── examples/                      # backtest_example.py, paper_trading_replay.py
-├── tests/                         # pytest (68 tests)
+├── tests/                         # pytest (69 tests)
 ├── docs/DATABASE.md               # schema details, ER diagram, SQL examples
 ├── main.py                        # CLI
 ├── alembic.ini, requirements.txt, pyproject.toml, docker-compose.yml, .env.example
@@ -333,7 +333,7 @@ JSON API: `/api/portfolio`, `/api/positions`, `/api/trades`, `/api/orders`, `/ap
 
 ```bash
 cd stock_bot
-pytest                       # 68 tests, offline, ~15s
+pytest                       # 69 tests, offline, ~15s
 ```
 ครอบคลุม: indicators, % change/direction, ทุกกลยุทธ์ (รวม test ว่าไม่มี look-ahead), risk manager, cost model,
 paper broker (market/limit), backtester + metrics, DB upsert/back-fill, fallback provider, collector,

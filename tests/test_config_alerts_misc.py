@@ -137,3 +137,20 @@ def test_dashboard_endpoints(settings, db):
         assert client.get(path).status_code == 200, path
     assert len(client.get("/api/signals?include_hold=true").json()) == 2
     assert client.get("/api/pnl/weekly").status_code == 400
+
+
+def test_demo_command_offline(monkeypatch, capsys):
+    """`python main.py demo --offline` runs every step end to end (paper, synthetic data)."""
+    import main
+    from config.settings import PROJECT_ROOT
+
+    monkeypatch.setattr(main, "_demo_name", lambda config, mode: f"demo_pytest_{mode}")
+    db_file = PROJECT_ROOT / "data" / "demo_pytest_offline.db"
+    try:
+        assert main.main(["demo", "--offline"]) == 0
+        out = capsys.readouterr().out
+        assert "MODE: OFFLINE" in out and "[5/5] Portfolio" in out and "Strategy comparison" in out
+        assert db_file.exists()
+    finally:
+        for f in db_file.parent.glob("demo_pytest_offline.db*"):
+            f.unlink()

@@ -262,6 +262,103 @@ def cmd_test_alert(args, settings: Settings, db: Database) -> None:
     print("Delivered" if ok else "Delivery failed - check logs/errors.log")
 
 
+def _yahoo_reachable(symbol: str) -> tuple[bool, str]:
+    """Quick probe: can we download real prices right now?"""
+    import logging
+
+    yf_log = logging.getLogger("yfinance")
+    old_level = yf_log.level
+    yf_log.setLevel(logging.CRITICAL)  # a failed probe is expected offline - keep output clean
+    logger.disable("utils.retry")
+    try:
+        from data.providers.yahoo import YahooProvider
+
+        df = YahooProvider(max_retries=1, timeout=10).fetch_history(symbol, interval="1d", period="5d")
+        return (not df.empty), "ok"
+    except ImportError:
+        return False, "yfinance not installed"
+    except Exception as exc:  # network blocked, rate limit, Yahoo outage...
+        text = str(exc)
+        if any(k in text for k in ("curl", "Connection", "403", "resolve", "timed out", "Timeout")):
+            return False, "cannot reach Yahoo Finance"
+        return False, text.splitlines()[0][:100]
+    finally:
+        yf_log.setLevel(old_level)
+        logger.enable("utils.retry")
+
+
+def cmd_demo(args, settings: Settings, db: Database) -> None:
+    """One command, works online or offline: probe -> backfill -> compare -> trade cycle -> summary -> status.
+
+    Online uses real Yahoo prices, offline uses synthetic prices. Each mode has its own
+    database and portfolio so fake and real data are never mixed. Always paper trading.
+    """
+    if not settings.watchlist:
+        raise SystemExit("watchlist is empty - add symbols to the config")
+    first = settings.watchlist[0].symbol
+
+    if args.offline:
+        online, why = False, "forced with --offline"
+    else:
+        print(f"Checking internet / Yahoo Finance ({first}) ...")
+        online, why = _yahoo_reachable(first)
+    mode = "online" if online else "offline"
+    provider = "yahoo" if online else "synthetic"
+    name = _demo_name(args.config, mode)
+
+    demo = settings.model_copy(deep=True)
+    demo.data.provider = provider
+    demo.data.fallback_providers = []
+    demo.database.url = f"sqlite:///./data/{name}.db"
+    demo.execution.mode = "paper"  # the demo never sends real orders
+    demo.execution.broker = "paper"
+    demo.execution.portfolio_name = name
+    demo.logging.level = "WARNING"
+    setup_logging(demo.logging)
+    demo_db = Database(demo.database.url)
+
+    banner = "ONLINE - real prices from Yahoo Finance" if online else f"OFFLINE - synthetic (fake) prices ({why})"
+    print("=" * 72 + f"\n MODE: {banner}\n DB  : {demo_db.engine.url.database}\n" + "=" * 72)
+
+    print("\n[1/5] Download price history (2y)")
+    cmd_backfill(argparse.Namespace(symbols=None, interval=None, provider=provider, period="2y"), demo, demo_db)
+
+    print(f"\n[2/5] Backtest all strategies on {first}")
+    try:
+        cmd_compare(argparse.Namespace(symbol=first, interval=None, provider=None, period="2y", start=None, end=None),
+                    demo, demo_db)
+    except Exception as exc:
+        print(f"  backtest skipped: {exc}")
+
+    print("\n[3/5] Paper-trading cycle")
+    cmd_run_once(argparse.Namespace(interval=None, provider=provider, no_fetch=False), demo, demo_db)
+
+    print("\n[4/5] Daily summary (up / down)")
+    cmd_summary(argparse.Namespace(date=None), demo, demo_db)
+
+    print("\n[5/5] Portfolio")
+    cmd_status(argparse.Namespace(), demo, demo_db)
+
+    cfg = f" -c {args.config}" if args.config else ""
+    print(f"\nDone ({mode}). Run again any time - it continues the same paper portfolio.\n"
+          f"Dashboard on this data: python main.py{cfg} demo-dashboard --{mode}")
+
+
+def _demo_name(config: str | None, mode: str) -> str:
+    """Separate DB + portfolio per config and mode (never mix markets/currencies or fake/real data)."""
+    stem = Path(config).stem.replace(".", "_") if config else "default"
+    return f"demo_{stem}_{mode}"
+
+
+def cmd_demo_dashboard(args, settings: Settings, db: Database) -> None:
+    name = _demo_name(args.config, "offline" if args.offline else "online")
+    demo = settings.model_copy(deep=True)
+    demo.database.url = f"sqlite:///./data/{name}.db"
+    demo.execution.mode, demo.execution.broker = "paper", "paper"
+    demo.execution.portfolio_name = name
+    cmd_dashboard(argparse.Namespace(host=None, port=None), demo, Database(demo.database.url))
+
+
 # --------------------------------------------------------------------------- parser
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(description="Automated stock trading bot (education/research)")
@@ -327,6 +424,16 @@ def build_parser() -> argparse.ArgumentParser:
     sp.set_defaults(func=cmd_close)
 
     sub.add_parser("test-alert", help="send a test notification").set_defaults(func=cmd_test_alert)
+
+    sp = sub.add_parser("demo", help="full demo in one command (real data if online, synthetic if offline)")
+    sp.add_argument("--offline", action="store_true", help="skip the internet check and use synthetic data")
+    sp.set_defaults(func=cmd_demo)
+
+    sp = sub.add_parser("demo-dashboard", help="dashboard for the demo database")
+    mode = sp.add_mutually_exclusive_group()
+    mode.add_argument("--online", action="store_true", help="(default)")
+    mode.add_argument("--offline", action="store_true")
+    sp.set_defaults(func=cmd_demo_dashboard)
     return p
 
 
