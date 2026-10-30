@@ -1,0 +1,57 @@
+# Example config for Thai stocks (SET). Run with:
+#   python main.py --config config/config.thai.example.yaml run-once
+
+database:
+  url: ${DATABASE_URL:-sqlite:///./data/stock_bot_th.db}
+
+data:
+  provider: yahoo
+  interval: 1d
+  history_period: 2y
+
+watchlist:
+  - {symbol: PTT.BK,    market: TH, name: PTT PCL,           sector: Energy}
+  - {symbol: CPALL.BK,  market: TH, name: CP ALL PCL,        sector: Commerce}
+  - {symbol: ADVANC.BK, market: TH, name: Advanced Info Service, sector: ICT}
+  - {symbol: KBANK.BK,  market: TH, name: Kasikornbank,      sector: Banking}
+  - {symbol: AOT.BK,    market: TH, name: Airports of Thailand, sector: Transportation}
+
+strategy:
+  name: rsi
+  params:
+    rsi: {period: 14, oversold: 30, overbought: 70}
+
+risk:
+  position_size_pct: 0.15
+  risk_per_trade_pct: 0.01
+  stop_loss_pct: 0.06
+  take_profit_pct: 0.12
+  max_daily_loss_pct: 0.03
+  max_open_positions: 4
+  max_drawdown_pct: 0.15
+
+execution:
+  mode: paper
+  broker: paper
+  portfolio_name: th-paper
+  initial_capital: 500000          # THB
+  commission_pct: 0.0015           # typical online rate 0.15%
+  min_commission: 50
+  commission_vat_pct: 0.07         # 7% VAT on commission
+  slippage_pct: 0.001
+
+alerts:
+  channels: [console]
+  price_move_pct: 5.0
+
+scheduler:
+  timezone: Asia/Bangkok
+  end_of_day:
+    enabled: true
+    hour: 17
+    minute: 15
+    day_of_week: mon-fri
+
+logging:
+  level: INFO
+  directory: ./logs

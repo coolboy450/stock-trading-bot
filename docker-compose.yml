@@ -1,0 +1,15 @@
+# Optional PostgreSQL for production use:
+#   docker compose up -d
+#   DATABASE_URL=postgresql+psycopg://stockbot:stockbot@localhost:5432/stock_bot
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: stockbot
+      POSTGRES_PASSWORD: stockbot
+      POSTGRES_DB: stock_bot
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    restart: unless-stopped
+volumes:
+  pgdata:

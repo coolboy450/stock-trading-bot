@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stock Bot Dashboard</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1d2330; --muted:#6b7280; --line:#e5e7eb; --up:#15803d; --down:#b91c1c; --accent:#2563eb; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0f1218; --card:#171b23; --text:#e6e8ec; --muted:#9aa3b2; --line:#2a303b; --up:#4ade80; --down:#f87171; --accent:#60a5fa; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui, -apple-system, "Segoe UI", "Noto Sans Thai", sans-serif; background:var(--bg); color:var(--text); }
+  header { padding:16px; display:flex; flex-wrap:wrap; gap:8px 16px; align-items:baseline; }
+  h1 { font-size:20px; margin:0; }
+  .badge { padding:2px 8px; border-radius:999px; font-size:12px; font-weight:600; background:var(--line); }
+  .badge.live { background:var(--down); color:#fff; }
+  .muted { color:var(--muted); }
+  main { padding:0 16px 32px; display:grid; gap:16px; }
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:12px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:14px; min-width:0; }
+  .kpi .label { color:var(--muted); font-size:12px; }
+  .kpi .value { font-size:20px; font-weight:600; font-variant-numeric:tabular-nums; }
+  .grid2 { display:grid; grid-template-columns:repeat(auto-fit, minmax(340px, 1fr)); gap:16px; }
+  h2 { font-size:15px; margin:0 0 10px; }
+  .scroll { overflow-x:auto; }
+  table { width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums; }
+  th, td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--line); white-space:nowrap; }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  .up { color:var(--up); } .down { color:var(--down); }
+  .disclaimer { font-size:12px; color:var(--muted); }
+  canvas { max-height:260px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>📈 Stock Bot</h1>
+  <span id="mode" class="badge">…</span>
+  <span id="updated" class="muted"></span>
+</header>
+<main>
+  <section class="kpis" id="kpis"></section>
+  <section class="grid2">
+    <div class="card"><h2>Equity curve</h2><canvas id="equityChart"></canvas></div>
+    <div class="card"><h2>Daily PnL</h2><canvas id="pnlChart"></canvas></div>
+  </section>
+  <section class="card"><h2>Open positions</h2><div class="scroll"><table id="positions"></table></div></section>
+  <section class="grid2">
+    <div class="card"><h2>Latest signals</h2><div class="scroll"><table id="signals"></table></div></div>
+    <div class="card"><h2>Daily summary (ขึ้น / ลง)</h2><div class="scroll"><table id="summary"></table></div></div>
+  </section>
+  <section class="card"><h2>Trades</h2><div class="scroll"><table id="trades"></table></div></section>
+  <section class="grid2">
+    <div class="card"><h2>Monthly PnL</h2><div class="scroll"><table id="monthly"></table></div></div>
+    <div class="card"><h2>Alerts</h2><div class="scroll"><table id="alerts"></table></div></div>
+  </section>
+  <p class="disclaimer">For education and research only. Not investment advice. Trading involves substantial risk of loss.</p>
+</main>
+<script>
+const fmt = (v, d = 2) => v == null ? "–" : Number(v).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+const cls = v => v == null ? "" : (v > 0 ? "up" : v < 0 ? "down" : "");
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+async function get(url) { const r = await fetch(url); if (!r.ok) throw new Error(await r.text()); return r.json(); }
+
+function table(id, cols, rows) {
+  const el = document.getElementById(id);
+  if (!rows.length) { el.innerHTML = '<tr><td class="muted">No data yet</td></tr>'; return; }
+  el.innerHTML = "<tr>" + cols.map(c => `<th>${c[0]}</th>`).join("") + "</tr>" +
+    rows.map(r => "<tr>" + cols.map(c => `<td>${c[1](r)}</td>`).join("") + "</tr>").join("");
+}
+
+let charts = {};
+const chartsAvailable = () => typeof Chart !== "undefined";
+function noChart(id) {
+  const c = document.getElementById(id);
+  if (c && !c.dataset.note) { c.dataset.note = 1; c.insertAdjacentHTML("afterend", '<p class="muted">Chart library unavailable (offline?) - tables below still work.</p>'); c.style.display = "none"; }
+}
+function lineChart(id, labels, data, label, color) {
+  if (!chartsAvailable()) return noChart(id);
+  charts[id]?.destroy();
+  charts[id] = new Chart(document.getElementById(id), {
+    type: "line", data: {labels, datasets: [{label, data, borderColor: color, pointRadius: 0, tension: .2}]},
+    options: {plugins: {legend: {display: false}}, scales: {x: {ticks: {maxTicksLimit: 6}}}}
+  });
+}
+function barChart(id, labels, data) {
+  if (!chartsAvailable()) return noChart(id);
+  charts[id]?.destroy();
+  const css = getComputedStyle(document.documentElement);
+  charts[id] = new Chart(document.getElementById(id), {
+    type: "bar",
+    data: {labels, datasets: [{data, backgroundColor: data.map(v => v >= 0 ? css.getPropertyValue("--up") : css.getPropertyValue("--down"))}]},
+    options: {plugins: {legend: {display: false}}, scales: {x: {ticks: {maxTicksLimit: 8}}}}
+  });
+}
+
+async function refresh() {
+  try {
+    const p = await get("/api/portfolio");
+    const mode = document.getElementById("mode");
+    mode.textContent = p.mode; mode.className = "badge" + (p.mode === "LIVE" ? " live" : "");
+    document.getElementById("updated").textContent = `${p.name} · updated ${p.updated_at.replace("T", " ").slice(0, 16)} UTC`;
+    const kpis = [
+      ["Equity", fmt(p.equity) + " " + p.currency], ["Cash", fmt(p.cash)], ["Positions value", fmt(p.positions_value)],
+      ["Total return", `<span class="${cls(p.total_return_pct)}">${fmt(p.total_return_pct)}%</span>`],
+      ["Realized PnL", `<span class="${cls(p.realized_pnl)}">${fmt(p.realized_pnl)}</span>`],
+      ["Drawdown", fmt(p.drawdown_pct) + "%"], ["Closed trades", p.closed_trades],
+      ["Win rate", p.win_rate_pct == null ? "–" : fmt(p.win_rate_pct, 1) + "%"],
+    ];
+    document.getElementById("kpis").innerHTML = kpis.map(([l, v]) =>
+      `<div class="card kpi"><div class="label">${l}</div><div class="value">${v}</div></div>`).join("");
+  } catch (e) {
+    document.getElementById("kpis").innerHTML = `<div class="card">${esc(e.message)}</div>`;
+    return;
+  }
+  const [eq, daily, monthly, pos, sig, sum, trades, alerts] = await Promise.all([
+    get("/api/equity"), get("/api/pnl/daily"), get("/api/pnl/monthly"), get("/api/positions"),
+    get("/api/signals?limit=20"), get("/api/daily-summary?limit=30"), get("/api/trades?limit=30"), get("/api/alerts?limit=15"),
+  ]);
+  lineChart("equityChart", eq.map(r => r.timestamp.slice(0, 16).replace("T", " ")), eq.map(r => r.equity), "Equity", "#2563eb");
+  barChart("pnlChart", daily.map(r => r.period), daily.map(r => r.pnl));
+  table("positions", [
+    ["Symbol", r => esc(r.symbol)], ["Qty", r => fmt(r.quantity, 0)], ["Entry", r => fmt(r.entry_price)],
+    ["Last", r => fmt(r.last_price)], ["Unrealized", r => `<span class="${cls(r.unrealized_pnl)}">${fmt(r.unrealized_pnl)} (${fmt(r.unrealized_pct)}%)</span>`],
+    ["SL", r => fmt(r.stop_loss)], ["TP", r => fmt(r.take_profit)], ["Strategy", r => esc(r.strategy)],
+  ], pos);
+  table("signals", [
+    ["Time", r => r.timestamp.slice(0, 16).replace("T", " ")], ["Symbol", r => esc(r.symbol)],
+    ["Signal", r => `<span class="${r.type === "BUY" ? "up" : "down"}">${r.type}</span>`], ["Price", r => fmt(r.price)],
+    ["Reason", r => esc(r.reason)], ["Action", r => esc(r.note)],
+  ], sig);
+  table("summary", [
+    ["Date", r => r.date], ["Symbol", r => esc(r.symbol)], ["Close", r => fmt(r.close)],
+    ["Change", r => `<span class="${cls(r.percent_change)}">${r.percent_change == null ? "–" : (r.percent_change > 0 ? "▲ +" : r.percent_change < 0 ? "▼ " : "") + fmt(r.percent_change) + "%"}</span>`],
+    ["Signal", r => esc(r.last_signal ?? "")],
+  ], sum);
+  table("trades", [
+    ["#", r => r.id], ["Symbol", r => esc(r.symbol)], ["Status", r => r.status], ["Qty", r => fmt(r.quantity, 0)],
+    ["Entry", r => fmt(r.entry_price)], ["Exit", r => fmt(r.exit_price)],
+    ["PnL", r => `<span class="${cls(r.pnl)}">${fmt(r.pnl)}</span>`], ["Reason", r => esc(r.exit_reason ?? "")],
+    ["Strategy", r => esc(r.strategy)],
+  ], trades);
+  table("monthly", [["Month", r => r.period], ["Equity", r => fmt(r.equity)],
+    ["PnL", r => `<span class="${cls(r.pnl)}">${fmt(r.pnl)} (${fmt(r.pnl_pct)}%)</span>`]], monthly);
+  table("alerts", [["Time", r => r.created_at.slice(0, 16).replace("T", " ")], ["Type", r => r.type],
+    ["Title", r => esc(r.title)]], alerts);
+}
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>

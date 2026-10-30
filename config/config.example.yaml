@@ -1,0 +1,118 @@
+# =====================================================================
+# Stock Trading Bot - example configuration
+# Copy to config/config.yaml and edit. Secrets go in .env and are
+# referenced here as ${VAR_NAME} or ${VAR_NAME:-default}.
+# =====================================================================
+
+database:
+  # SQLite for getting started; PostgreSQL for production:
+  #   postgresql+psycopg://user:pass@localhost:5432/stock_bot
+  url: ${DATABASE_URL:-sqlite:///./data/stock_bot.db}
+  echo: false
+
+data:
+  provider: yahoo                  # yahoo | alpha_vantage | synthetic (offline demo)
+  fallback_providers: []           # e.g. [alpha_vantage]
+  interval: 1d                     # bar size for the trading cycle: 1m 5m 15m 1h 1d
+  history_period: 2y               # how far back `backfill` goes
+  lookback_bars: 300               # bars loaded from DB when generating signals
+  alpha_vantage_api_key: ${ALPHA_VANTAGE_API_KEY:-}
+  alpha_vantage_outputsize: compact
+  request_timeout: 20
+  max_retries: 3
+  retry_delay_seconds: 2
+
+# Thai stocks use the Yahoo ".BK" suffix. Keep one currency per portfolio
+# (the bot does not convert FX) - use a separate config file per market.
+watchlist:
+  - {symbol: AAPL, market: US, name: Apple Inc., sector: Technology}
+  - {symbol: MSFT, market: US, name: Microsoft Corp., sector: Technology}
+  - {symbol: NVDA, market: US, name: NVIDIA Corp., sector: Technology}
+  - {symbol: SPY,  market: US, name: SPDR S&P 500 ETF, sector: ETF, strategy: bollinger}
+
+markets:
+  TH:
+    timezone: Asia/Bangkok
+    sessions: [["10:00", "12:30"], ["14:30", "16:30"]]
+    lot_size: 100                  # SET board lot
+    currency: THB
+    holidays: []                   # add SET holidays: ["2026-12-31", ...]
+  US:
+    timezone: America/New_York
+    sessions: [["09:30", "16:00"]]
+    lot_size: 1
+    currency: USD
+    holidays: []
+
+strategy:
+  name: ma_crossover               # ma_crossover | rsi | bollinger | breakout | momentum
+  params:
+    ma_crossover: {fast_period: 20, slow_period: 50, ma_type: ema}
+    rsi:          {period: 14, oversold: 30, overbought: 70}
+    bollinger:    {period: 20, std_dev: 2.0, exit_at: middle}
+    breakout:     {entry_period: 20, exit_period: 10, volume_factor: 1.0}
+    momentum:     {period: 20, entry_threshold: 5.0, exit_threshold: 0.0, trend_period: 100}
+
+risk:
+  position_size_pct: 0.10          # max 10% of equity per position
+  risk_per_trade_pct: 0.01         # risk 1% of equity between entry and stop (null = disable)
+  stop_loss_pct: 0.05
+  take_profit_pct: 0.10
+  max_daily_loss_pct: 0.03         # stop opening trades after -3% on the day
+  max_open_positions: 5
+  max_drawdown_pct: 0.15           # stop opening trades when drawdown > 15%
+  min_cash_reserve_pct: 0.05
+
+execution:
+  mode: paper                      # paper (default) | live  <-- live trades REAL money
+  broker: paper                    # paper | alpaca | settrade
+  portfolio_name: us-paper
+  initial_capital: 100000
+  commission_pct: 0.001            # 0.1% per side
+  min_commission: 0
+  commission_vat_pct: 0            # Thai brokers: 0.07 (VAT on commission)
+  slippage_pct: 0.0005
+  order_type: market               # market | limit
+  limit_offset_pct: 0.002
+  limit_order_ttl_minutes: 60
+  live_max_order_value: 5000       # hard cap per order in live mode
+  alpaca_base_url: ${ALPACA_BASE_URL:-https://paper-api.alpaca.markets}
+  alpaca_api_key: ${ALPACA_API_KEY:-}
+  alpaca_api_secret: ${ALPACA_API_SECRET:-}
+
+alerts:
+  channels: [console]              # console | telegram | discord | line
+  telegram_bot_token: ${TELEGRAM_BOT_TOKEN:-}
+  telegram_chat_id: ${TELEGRAM_CHAT_ID:-}
+  discord_webhook_url: ${DISCORD_WEBHOOK_URL:-}
+  line_channel_access_token: ${LINE_CHANNEL_ACCESS_TOKEN:-}
+  line_to: ${LINE_TO:-}
+  notify_signals: true
+  notify_trades: true
+  price_move_pct: 5.0              # alert when a bar moves >= 5%
+  drawdown_alert_pct: 0.10
+  cooldown_minutes: 60
+
+scheduler:
+  timezone: America/New_York
+  intraday:
+    enabled: false
+    every_minutes: 5
+    interval: 5m
+    only_market_hours: true
+  end_of_day:
+    enabled: true
+    hour: 16
+    minute: 30
+    day_of_week: mon-fri
+
+logging:
+  level: INFO
+  directory: ./logs
+  rotation: 10 MB
+  retention: 30 days
+  json_logs: false
+
+dashboard:
+  host: 127.0.0.1
+  port: 8000

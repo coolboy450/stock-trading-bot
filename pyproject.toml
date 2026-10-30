@@ -1,0 +1,15 @@
+[project]
+name = "stock-bot"
+version = "1.0.0"
+description = "Automated stock trading bot for education and research (paper trading by default)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
