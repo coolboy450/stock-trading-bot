@@ -7,6 +7,7 @@ break when Yahoo changes its site. Intraday history is limited
 
 from __future__ import annotations
 
+import warnings
 from datetime import datetime
 
 import pandas as pd
@@ -46,7 +47,10 @@ class YahooProvider(DataProvider):
                     kwargs["end"] = end
             else:
                 kwargs["period"] = period or "1mo"
-            raw = yf.Ticker(symbol).history(**kwargs)
+            with warnings.catch_warnings():  # yfinance's own pandas deprecation noise
+                warnings.simplefilter("ignore", FutureWarning)
+                warnings.simplefilter("ignore", DeprecationWarning)
+                raw = yf.Ticker(symbol).history(**kwargs)
             if raw is None or raw.empty:
                 raise DataProviderError(f"Yahoo returned no data for {symbol} ({interval})")
             return raw

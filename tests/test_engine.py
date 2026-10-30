@@ -1,6 +1,6 @@
 """End-to-end tests of the paper trading engine (synthetic data, in-memory DB)."""
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytest
@@ -201,3 +201,31 @@ def test_engine_with_file_sqlite_no_lock_errors(settings, tmp_path, trending_df)
     with file_db.session() as s:
         logged = s.scalar(select(func.count()).select_from(AlertLog))
         assert logged == len(notifier.messages) > 0
+
+
+def test_daily_signal_ignores_bar_of_open_session(settings, db, trending_df):
+    """While the market is open, today's (unfinished) daily bar must not drive signals."""
+    from strategies import get_strategy
+
+    settings.watchlist = settings.watchlist[:1]
+    sig = get_strategy("ma_crossover", {"fast_period": 5, "slow_period": 20}).generate_signals(trending_df)["signal"]
+    buy_pos = int((sig.to_numpy() == 1).nonzero()[0][0])
+    # Re-stamp bars so the BUY bar is "today" 00:00 New York and "now" is 11:00 New York (session open).
+    df = trending_df.iloc[: buy_pos + 1].copy()
+    today_bar = datetime(2026, 6, 2, 4, 0)  # Tue 00:00 America/New_York in UTC
+    df.index = pd.DatetimeIndex([today_bar - timedelta(days=len(df) - 1 - i) for i in range(len(df))])
+    provider = FrameProvider({"AAA": df}, cursor=len(df))
+
+    engine, _ = build_engine(settings, db, provider)
+    engine.clock = lambda: datetime(2026, 6, 2, 15, 0)  # 11:00 New York -> open
+    report = engine.run_cycle()
+    assert report.symbols[0].signal == "HOLD"
+    assert "still open" in report.symbols[0].action
+    with db.session() as s:
+        assert s.scalar(select(func.count()).select_from(Trade)) == 0
+
+    engine.clock = lambda: datetime(2026, 6, 2, 21, 0)  # 17:00 New York -> closed
+    report = engine.run_cycle()
+    assert report.symbols[0].signal == "BUY"
+    with db.session() as s:
+        assert s.scalar(select(func.count()).select_from(Trade)) == 1

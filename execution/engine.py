@@ -43,6 +43,7 @@ from monitoring.alerts import AlertManager
 from risk.manager import AccountState, RiskManager
 from strategies import BUY, SELL, BaseStrategy, get_strategy
 from utils.logger import trade_logger
+from utils.market_hours import is_market_open
 
 _SIGNAL_TYPE = {BUY: SignalType.BUY, SELL: SignalType.SELL}
 
@@ -218,6 +219,18 @@ class TradingEngine:
         )
 
     # ================================================================ internals
+    def _bar_still_open(self, item: WatchItem, interval: str, bar_time: datetime) -> bool:
+        """True if ``bar_time`` is today's daily bar and the market has not closed yet."""
+        if interval != "1d":
+            return False
+        market = self.settings.market_for(item)
+        now = self.clock()
+        if not is_market_open(market, now):
+            return False
+        tz, utc = ZoneInfo(market.timezone), ZoneInfo("UTC")
+        bar_day = bar_time.replace(tzinfo=utc).astimezone(tz).date()
+        return bar_day == now.replace(tzinfo=utc).astimezone(tz).date()
+
     def _strategy_for(self, item: WatchItem) -> BaseStrategy:
         name = item.strategy or self.settings.strategy.name
         if name not in self._strategies:
@@ -258,12 +271,18 @@ class TradingEngine:
                 exited = True
             trade = repo.open_trade_for(s, pf.id, stock.id)
 
-        # 2) strategy signal
+        # 2) strategy signal - from completed bars only. A daily bar for a session
+        # that is still trading changes until the close, so it must not trigger trades.
+        closed = df
+        if self._bar_still_open(item, interval, bar_time):
+            closed = df.iloc[:-1]
+            actions.append("today's bar still open - signal from last closed bar")
+        signal_bar_time = closed.index[-1].to_pydatetime() if len(closed) else bar_time
         strategy = self._strategy_for(item)
-        if len(df) < strategy.min_bars:
-            rep.action = "; ".join(actions + [f"need {strategy.min_bars} bars, have {len(df)}"])
+        if len(closed) < strategy.min_bars:
+            rep.action = "; ".join(actions + [f"need {strategy.min_bars} bars, have {len(closed)}"])
             return
-        sig_df = strategy.generate_signals(df[["open", "high", "low", "close", "volume"]])
+        sig_df = strategy.generate_signals(closed[["open", "high", "low", "close", "volume"]])
         sig_val = int(sig_df["signal"].iloc[-1])
         sig_type = _SIGNAL_TYPE.get(sig_val, SignalType.HOLD)
         rep.signal = sig_type.value
@@ -273,7 +292,7 @@ class TradingEngine:
             strategy=strategy.name,
             signal_type=sig_type,
             interval=interval,
-            timestamp=bar_time,
+            timestamp=signal_bar_time,
             price=price,
             reason=str(sig_df["reason"].iloc[-1]) or None,
             indicators=strategy.latest_indicators(sig_df),
