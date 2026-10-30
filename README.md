@@ -143,6 +143,21 @@ python main.py demo-dashboard                            # dashboard ของ�
 - เป็น **Paper Trading เสมอ** แม้ config จะตั้ง `mode: live`
 - รันซ้ำได้เรื่อย ๆ (เช่นวันละครั้งหลังตลาดปิด) พอร์ตเดิมจะเดินต่อ
 
+### Windows (PowerShell)
+
+Windows PowerShell 5.1 ไม่รองรับ `&&` ให้พิมพ์ทีละบรรทัด (ต้องติดตั้ง [Python 3.11+](https://www.python.org/downloads/) ติ๊ก "Add python.exe to PATH" และ [Git](https://git-scm.com/download/win)):
+
+```powershell
+cd $HOME\Documents
+git clone https://github.com/coolboy450/stock-trading-bot.git
+cd stock-trading-bot
+py -m venv .venv
+.\.venv\Scripts\Activate.ps1      # ถ้าขึ้น error เรื่อง script: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+pip install -r requirements.txt
+python main.py demo
+python main.py demo-dashboard     # แล้วเปิด http://127.0.0.1:8000
+```
+
 ### คำสั่งแยกทีละขั้น (offline)
 
 ใช้ข้อมูลจำลอง (synthetic — **ไม่ใช่ราคาจริง**) เพื่อลองระบบทั้งหมดโดยไม่ต้องใช้อินเทอร์เน็ต:
