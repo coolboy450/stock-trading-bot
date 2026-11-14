@@ -40,7 +40,9 @@ from database.session import Database
 from execution.broker import BaseBroker, OrderRequest, OrderResult
 from execution.costs import CostModel
 from monitoring.alerts import AlertManager
+from monitoring.status import StatusWriter
 from risk.manager import AccountState, RiskManager
+from risk.price_guard import PriceContext, PriceGuard
 from strategies import BUY, SELL, BaseStrategy, get_strategy
 from utils.logger import trade_logger
 from utils.market_hours import is_market_open
@@ -55,6 +57,10 @@ class SymbolReport:
     price: float | None = None
     action: str = ""
     error: str | None = None
+    percent_change: float | None = None
+    strategy: str | None = None
+    bar_time: datetime | None = None
+    blocked: bool = False  # an order was cancelled by the price guard
 
 
 @dataclass
@@ -94,6 +100,7 @@ class TradingEngine:
         broker: BaseBroker,
         alerts: AlertManager,
         clock: Callable[[], datetime] = utcnow,
+        status: StatusWriter | None = None,
     ) -> None:
         """``clock`` returns naive-UTC "now"; override it to replay history (forward tests)."""
         self.settings = settings
@@ -106,13 +113,31 @@ class TradingEngine:
         self.mode = TradingMode.LIVE if settings.is_live else TradingMode.PAPER
         self._strategies: dict[str, BaseStrategy] = {}
         self.clock = clock
+        self.guard = PriceGuard(settings.price_guard)
+        self.status = status or StatusWriter(None)  # memory only unless a path is given
+        self._price_ctx: dict[str, PriceContext] = {}
+        self._cycle_blocked: set[str] = set()
+        self._round_id = 0
 
     # ================================================================ public API
-    def run_cycle(self, interval: str | None = None, *, fetch: bool = True) -> CycleReport:
+    def run_cycle(
+        self, interval: str | None = None, *, fetch: bool = True, trigger: str = "schedule"
+    ) -> CycleReport:
         """Process every watchlist symbol once and snapshot the portfolio."""
         interval = interval or self.settings.data.interval
         report = CycleReport(started_at=self.clock(), interval=interval)
-        logger.info("=== Trading cycle start [{}] mode={} ===", interval, self.mode.value)
+        symbols = [i.symbol for i in self.settings.watchlist]
+        self.status.set_watchlist_order(symbols)
+        self._price_ctx.clear()
+        self._cycle_blocked.clear()
+        self._round_id = self.status.begin_round(interval, report.started_at, len(symbols), trigger)
+        logger.info("=== Trading cycle #{} start [{}] mode={} ===", self._round_id, interval, self.mode.value)
+        try:
+            return self._run_cycle(report, interval, fetch)
+        finally:
+            self.status.end_round(self.clock())
+
+    def _run_cycle(self, report: CycleReport, interval: str, fetch: bool) -> CycleReport:
 
         try:
             with self.alerts.deferred(), self.db.session() as s:
@@ -121,8 +146,10 @@ class TradingEngine:
             logger.exception("Pending-order processing failed")
             self.alerts.error("pending_orders", exc)
 
-        for item in self.settings.watchlist:
+        for idx, item in enumerate(self.settings.watchlist, start=1):
             sym_report = SymbolReport(item.symbol)
+            self.status.step("fetch", symbol=item.symbol, symbol_index=idx,
+                             detail=f"ดึงราคา {item.symbol}" if fetch else f"ใช้ข้อมูลในฐานข้อมูล {item.symbol}")
             try:
                 # One transaction per symbol: a failure only rolls back that symbol.
                 # Alert logs are written after the commit (see AlertManager.deferred).
@@ -133,6 +160,12 @@ class TradingEngine:
                 sym_report.error = str(exc)
                 self.alerts.error(f"symbol {item.symbol}", exc)
             report.symbols.append(sym_report)
+            self.status.update_symbol({
+                "symbol": item.symbol, "signal": sym_report.signal, "price": sym_report.price,
+                "percent_change": sym_report.percent_change, "strategy": sym_report.strategy,
+                "action": sym_report.action, "blocked": sym_report.blocked, "error": sym_report.error,
+                "bar_time": sym_report.bar_time.isoformat() if sym_report.bar_time else None,
+            })
 
         with self.alerts.deferred(), self.db.session() as s:
             pf = self.portfolio(s)
@@ -190,6 +223,17 @@ class TradingEngine:
         pf.positions_value = value
         pf.equity = pf.cash + value
         pf.peak_equity = max(pf.peak_equity, pf.equity)
+        self.status.set_portfolio({
+            "name": pf.name, "paper": True, "currency": pf.currency,
+            "initial_capital": pf.initial_capital, "equity": round(pf.equity, 2), "cash": round(pf.cash, 2),
+            "positions_value": round(value, 2), "realized_pnl": round(pf.realized_pnl, 2),
+            "unrealized_pnl": round(sum(p["unrealized_pnl"] for p in positions), 2),
+            "pnl_total": round(pf.equity - pf.initial_capital, 2),
+            "return_pct": round((pf.equity / pf.initial_capital - 1) * 100, 4) if pf.initial_capital else 0.0,
+            "drawdown_pct": round(pf.drawdown_pct * 100, 4),
+            "open_positions": len(positions), "max_open_positions": self.settings.risk.max_open_positions,
+            "positions": positions,
+        })
         if snapshot:
             session.add(
                 PortfolioSnapshot(
@@ -239,8 +283,10 @@ class TradingEngine:
 
     def _process_symbol(self, s: Session, item: WatchItem, interval: str, fetch: bool, rep: SymbolReport) -> None:
         stock = self.collector.ensure_stock(s, item)
+        fetched_ok = False
         if fetch:
             result = self.collector.update(s, item, interval)
+            fetched_ok = result.ok
             if not result.ok:
                 rep.error = f"fetch failed: {result.error}"
                 self.alerts.error(f"data {item.symbol}", result.error or "unknown")
@@ -254,6 +300,12 @@ class TradingEngine:
         price = float(df["close"].iloc[-1])
         rep.price = price
         pct = df["percent_change"].iloc[-1]
+        rep.percent_change = None if pd.isna(pct) else float(pct)
+        rep.bar_time = bar_time
+        self._price_ctx[item.symbol] = PriceContext(
+            market_price=price, prev_close=float(df["close"].iloc[-2]) if len(df) > 1 else None,
+            bar_time=bar_time, now=self.clock(), interval=interval, fetched_this_cycle=fetched_ok,
+        )
         self.alerts.price_move(item.symbol, None if pd.isna(pct) else float(pct), price, bar_time)
 
         pf = self.portfolio(s)
@@ -279,6 +331,8 @@ class TradingEngine:
             actions.append("today's bar still open - signal from last closed bar")
         signal_bar_time = closed.index[-1].to_pydatetime() if len(closed) else bar_time
         strategy = self._strategy_for(item)
+        rep.strategy = strategy.name
+        self.status.step("signal", symbol=item.symbol, detail=f"คำนวณสัญญาณ {item.symbol} ({strategy.name})")
         if len(closed) < strategy.min_bars:
             rep.action = "; ".join(actions + [f"need {strategy.min_bars} bars, have {len(closed)}"])
             return
@@ -317,12 +371,14 @@ class TradingEngine:
         if actions and sig_type != SignalType.HOLD:
             signal.action_note = "; ".join(a for a in actions if a)
         rep.action = "; ".join(a for a in actions if a) or "-"
+        rep.blocked = item.symbol in self._cycle_blocked
 
     def _enter(
         self, s: Session, pf: Portfolio, stock: Stock, item: WatchItem, price: float, strategy: str, signal: Signal
     ) -> str:
         if self._has_pending(s, pf, stock, OrderSide.BUY):
             return "entry order already pending"
+        self.status.step("risk", symbol=stock.symbol, detail=f"ตรวจความเสี่ยง {stock.symbol}")
         state = self.account_state(s, pf)
         decision = self.risk.can_open_position(state)
         if not decision.allowed:
@@ -347,7 +403,7 @@ class TradingEngine:
             limit_price=round(planned, 4) if is_limit else None, reference_price=price,
         )
         order = self._new_order(s, pf, stock, request, purpose="ENTRY", signal=signal)
-        result = self._place(request)
+        result = self._guarded_place(request, planned)
         return self._apply_result(s, pf, order, result, strategy=strategy)
 
     def _exit(
@@ -357,8 +413,39 @@ class TradingEngine:
             return "no price to exit"
         request = OrderRequest(trade.stock.symbol, "SELL", trade.quantity, "MARKET", reference_price=price)
         order = self._new_order(s, pf, trade.stock, request, purpose=reason.value, signal=signal, trade=trade)
-        result = self._place(request)
+        result = self._guarded_place(request, price)
         return self._apply_result(s, pf, order, result)
+
+    def _guarded_place(self, request: OrderRequest, order_price: float) -> OrderResult:
+        """Run the price guard; if any check fails the order is cancelled and never reaches the broker.
+
+        ``order_price`` is the price we expect to trade at (limit price, or reference +/- slippage for market).
+        """
+        ctx = self._price_ctx.get(request.symbol)
+        if ctx is None:  # manual close: no fetch this cycle, so skip only the "fresh fetch" requirement
+            now = self.clock()
+            ctx = PriceContext(market_price=order_price, prev_close=None, bar_time=now, now=now,
+                               fetched_this_cycle=None)
+        self.status.step("order", symbol=request.symbol, detail=f"ตรวจกันราคา {request.symbol} ก่อนส่ง {request.side}")
+        decision = self.guard.check(side=request.side, quantity=request.quantity, order_price=order_price, ctx=ctx)
+        alerted: bool | None = None
+        if not decision.allowed:
+            logger.warning("PRICE GUARD cancelled {} {} x{:g} @ {:.4f} [PAPER]: {}", request.side, request.symbol,
+                           request.quantity, order_price, decision.reason)
+            alerted = self.alerts.price_guard(request.symbol, request.side, request.quantity, order_price,
+                                              decision.reason, [c.key for c in decision.failed])
+            self._cycle_blocked.add(request.symbol)
+        elif self.guard.cfg.enabled:
+            logger.info("price guard passed {} {} ({}/{})", request.side, request.symbol,
+                        len(decision.checks), len(decision.checks))
+        if self.guard.cfg.enabled:
+            self.status.record_guard(request.symbol, request.side, request.quantity, order_price,
+                                     decision.to_dict(), round_id=self._round_id, at=self.clock(),
+                                     discord_sent=alerted)
+        if not decision.allowed:
+            return OrderResult("REJECTED", message=f"PRICE_GUARD: {decision.reason}")
+        self.status.step("order", symbol=request.symbol, detail=f"ส่งคำสั่งจำลอง {request.side} {request.symbol}")
+        return self._place(request)
 
     def _place(self, request: OrderRequest) -> OrderResult:
         try:

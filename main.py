@@ -69,8 +69,13 @@ def _provider(settings: Settings, override: str | None = None):
     return build_provider(data)
 
 
-def _engine(settings: Settings, db: Database, provider_override: str | None = None, *, read_only: bool = False):
-    """Build the trading engine. ``read_only`` uses a paper broker (no live confirmation)."""
+def _engine(settings: Settings, db: Database, provider_override: str | None = None, *, read_only: bool = False,
+            publish_status: bool = False):
+    """Build the trading engine. ``read_only`` uses a paper broker (no live confirmation).
+
+    ``publish_status`` mirrors the engine state into data/status.json for the /monitor page
+    (only run-once / schedule do this; demo and read-only commands never touch the file).
+    """
     from execution.broker import PaperBroker
     from execution.costs import CostModel
     from execution.engine import TradingEngine
@@ -78,9 +83,14 @@ def _engine(settings: Settings, db: Database, provider_override: str | None = No
     from monitoring.alerts import AlertManager
     from monitoring.notifier import build_notifier
 
+    from monitoring.status import build_status_writer
+
     alerts = AlertManager(settings.alerts, build_notifier(settings.alerts), db)
     broker = PaperBroker(CostModel.from_settings(settings.execution)) if read_only else build_broker(settings)
-    return TradingEngine(settings, db, _provider(settings, provider_override), broker, alerts)
+    status = build_status_writer(settings) if publish_status else None
+    if status:
+        status.attach_logger()
+    return TradingEngine(settings, db, _provider(settings, provider_override), broker, alerts, status=status)
 
 
 # --------------------------------------------------------------------------- commands
@@ -182,8 +192,8 @@ def cmd_compare(args, settings: Settings, db: Database) -> None:
 
 def cmd_run_once(args, settings: Settings, db: Database) -> None:
     db.create_all()
-    engine = _engine(settings, db, args.provider)
-    report = engine.run_cycle(interval=args.interval, fetch=not args.no_fetch)
+    engine = _engine(settings, db, args.provider, publish_status=not getattr(args, "no_status", False))
+    report = engine.run_cycle(interval=args.interval, fetch=not args.no_fetch, trigger="cli")
     print(report.format())
 
 
@@ -191,7 +201,7 @@ def cmd_schedule(args, settings: Settings, db: Database) -> None:
     from scheduler.jobs import build_scheduler, end_of_day_job
 
     db.create_all()
-    engine = _engine(settings, db, args.provider)
+    engine = _engine(settings, db, args.provider, publish_status=True)
     scheduler = build_scheduler(engine)
     for job in scheduler.get_jobs():
         logger.info("Scheduled job: {}", job.name)
@@ -331,7 +341,7 @@ def cmd_demo(args, settings: Settings, db: Database) -> None:
         print(f"  backtest skipped: {exc}")
 
     print("\n[3/5] Paper-trading cycle")
-    cmd_run_once(argparse.Namespace(interval=None, provider=provider, no_fetch=False), demo, demo_db)
+    cmd_run_once(argparse.Namespace(interval=None, provider=provider, no_fetch=False, no_status=True), demo, demo_db)
 
     print("\n[4/5] Daily summary (up / down)")
     cmd_summary(argparse.Namespace(date=None), demo, demo_db)

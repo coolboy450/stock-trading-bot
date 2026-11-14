@@ -127,6 +127,17 @@ class AlertManager:
     def risk_block(self, symbol: str, reason: str) -> None:
         self.send("RISK", f"Entry blocked: {symbol}", reason, "WARNING", key=f"risk:{reason[:40]}")
 
+    def price_guard(self, symbol: str, side: str, quantity: float, price: float, reason: str,
+                    failed_keys: list[str], *, mode: str = "PAPER") -> bool:
+        """Order cancelled by the price guard (sent to every channel, e.g. Discord)."""
+        return self.send(
+            "PRICE_GUARD",
+            f"[{mode}] ยกเลิกคำสั่ง {side} {symbol} (ราคาผิดปกติ)",
+            f"[{mode}] {side} {quantity:g} {symbol} @ {price:,.4f}\nไม่ผ่าน: {reason}",
+            "ERROR",
+            key=f"guard:{symbol}:{side}:{','.join(sorted(failed_keys))}",
+        )
+
     def error(self, where: str, exc: BaseException | str) -> None:
         self.send("ERROR", f"Error in {where}", str(exc)[:1500], "ERROR", key=f"err:{where}:{str(exc)[:80]}")
 

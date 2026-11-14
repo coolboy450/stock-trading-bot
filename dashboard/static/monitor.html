@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>/monitor — noob_dev</title>
+<link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans+Thai:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0D1117;--surface:#161B22;--border:#2A313C;--text:#E6EDF3;--muted:#8B949E;
+  --accent:#A3E635;--accent-ink:#0D1117;--pop:#F472B6;--warn:#FBBF24;--error:#F87171;
+  --sans:'IBM Plex Sans Thai',system-ui,sans-serif;--mono:'IBM Plex Mono',ui-monospace,monospace;
+  --s1:4px;--s2:8px;--s3:12px;--s4:16px;--s5:24px;--s6:32px;--s7:48px;
+  --r-sm:6px;--r-md:12px;--r-lg:20px;--r-pill:999px;
+}
+@media (prefers-color-scheme:light){
+  :root{--bg:#FAFAF7;--surface:#FFFFFF;--border:#E4E4DE;--text:#14171C;--muted:#5E6570;
+    --accent:#4D7C0F;--accent-ink:#FFFFFF;--pop:#DB2777;--warn:#B45309;--error:#DC2626}
+  .card{box-shadow:0 1px 2px rgb(0 0 0 / .06),0 4px 16px rgb(0 0 0 / .06)}
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:400 16px/1.7 var(--sans);overflow-x:hidden;padding-bottom:var(--s7)}
+h1,h2,h3,h4{margin:0;line-height:1.3;font-weight:700;letter-spacing:-0.01em}
+p{margin:0}
+ul,ol{margin:0;padding:0;list-style:none}
+button{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.muted{color:var(--muted)}
+.neg{color:var(--error)}
+.wrap{max-width:1120px;margin:0 auto;padding:var(--s4) var(--s4) 0}
+@media (min-width:768px){.wrap{padding:var(--s5) var(--s5) 0}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--s5);min-width:0}
+.label{font:400 12px/1.7 var(--mono);color:var(--muted);text-transform:lowercase}
+.tag{display:inline-flex;align-items:center;gap:var(--s1);font:400 12px/1.7 var(--mono);background:var(--surface);
+  border:1px solid var(--border);border-radius:var(--r-pill);padding:0 var(--s2);white-space:nowrap}
+.paper{display:inline-flex;align-items:center;font:600 12px/1.7 var(--mono);color:var(--pop);
+  border:1px solid var(--pop);border-radius:var(--r-pill);padding:0 var(--s2);white-space:nowrap;letter-spacing:.04em}
+.paper-solid{background:var(--pop);color:var(--accent-ink)}
+.sig-buy{color:var(--text);border-color:var(--text)}
+.sig-sell{color:var(--warn);border-color:var(--warn)}
+.sig-hold{color:var(--muted)}
+.sig-blocked{color:var(--error);border-color:var(--error)}
+.tag.warn{color:var(--warn);border-color:var(--warn)}
+.btn{display:inline-flex;align-items:center;justify-content:center;height:44px;padding:0 20px;border-radius:var(--r-sm);
+  font:500 16px/1 var(--sans);cursor:pointer;border:1px solid transparent;transition:background .2s ease-out,color .2s ease-out}
+.btn-primary{background:var(--accent);color:var(--accent-ink)}
+.btn[disabled]{background:var(--border);color:var(--muted);cursor:not-allowed}
+.dot{display:inline-block;width:8px;height:8px;border-radius:var(--r-pill);background:var(--text)}
+.dot.live{animation:pulse 2s ease-out infinite}
+.dot.off{background:var(--error);animation:none}
+.dot.stale{background:var(--warn);animation:none}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+.logo{display:inline-flex;align-items:center;min-height:44px;font:600 16px/1 var(--mono);color:var(--text);text-decoration:none}
+.logo b{color:var(--accent);font-weight:600}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+.top{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s3);justify-content:space-between;margin-bottom:var(--s4)}
+.top .l,.top .r{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap}
+
+.hero{border-radius:var(--r-lg);padding:var(--s5)}
+@media (min-width:768px){.hero{padding:var(--s6)}}
+.hero-top{display:flex;flex-wrap:wrap;gap:var(--s4);align-items:flex-start;justify-content:space-between}
+.hero h3{font-size:24px}
+@media (min-width:768px){.hero h3{font-size:32px}}
+.hero .sub{color:var(--muted);font-size:14px;margin-top:var(--s1)}
+.pipe{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:var(--s2);margin-top:var(--s5)}
+.pipe li{display:flex;flex-direction:column;gap:var(--s2)}
+.pipe .bar{height:8px;border-radius:var(--r-pill);background:var(--border)}
+.pipe .done .bar{background:var(--muted)}
+.pipe .on .bar{background:var(--text)}
+.pipe .t{font-size:12px;color:var(--muted);line-height:1.7}
+.pipe .on .t{color:var(--text);font-weight:500}
+.pipe .ic{display:block;width:24px;height:24px;color:var(--muted)}
+.pipe .ic svg{display:block}
+.pipe .on .ic{color:var(--text)}
+.pipe .n{font:400 12px/1 var(--mono);color:var(--muted)}
+@media (max-width:767px){.pipe li:not(.on) .t{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}}
+.meta{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s5);margin-top:var(--s5);font-size:14px}
+.meta .num{color:var(--text)}
+.banner{margin-top:var(--s4);border:1px solid var(--warn);color:var(--warn);border-radius:var(--r-sm);padding:var(--s2) var(--s3);font-size:14px}
+.banner.err{border-color:var(--error);color:var(--error)}
+.banner[hidden]{display:none}
+
+.chips{display:grid;grid-template-columns:1fr 1fr;gap:var(--s2);margin:var(--s5) 0 var(--s4)}
+@media (min-width:768px){.chips{grid-template-columns:repeat(4,1fr);gap:var(--s3)}}
+.chips button{all:unset;box-sizing:border-box;cursor:pointer;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r-md);padding:var(--s3);min-height:44px;display:grid;gap:var(--s1)}
+.chips button[aria-pressed="true"]{border-color:var(--text)}
+.chips button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.chips .row{display:flex;justify-content:space-between;align-items:center;gap:var(--s2)}
+.chips .s{font:600 14px/1.3 var(--mono)}
+.chips .p{font:400 14px/1.3 var(--mono)}
+.chips .c{font:400 12px/1.7 var(--mono);color:var(--muted)}
+.chips .empty{color:var(--muted);font-size:14px;grid-column:1/-1}
+
+.main{display:grid;gap:var(--s4);grid-template-columns:minmax(0,1fr)}
+@media (min-width:1024px){.main{grid-template-columns:minmax(0,3fr) minmax(0,2fr);gap:var(--s5)}}
+.chart{position:relative;border-radius:var(--r-md);background:var(--bg);border:1px solid var(--border);overflow:hidden;height:360px}
+@media (min-width:1024px){.chart{height:480px}}
+.chart .tradingview-widget-container,.chart .tradingview-widget-container__widget{height:100%;width:100%}
+.chart .sym{position:absolute;left:var(--s4);bottom:var(--s2);z-index:1;pointer-events:none}
+.pf .eq{font:600 32px/1.3 var(--mono);margin:var(--s1) 0}
+@media (min-width:768px){.pf .eq{font-size:48px}}
+.pf .row{display:flex;justify-content:space-between;gap:var(--s3);padding:var(--s2) 0;border-top:1px solid var(--border);font-size:14px}
+.pf h4{font-size:14px;margin:var(--s4) 0 var(--s1);display:flex;gap:var(--s2);align-items:center}
+
+.bottom{display:grid;gap:var(--s4);margin-top:var(--s4);grid-template-columns:minmax(0,1fr)}
+@media (min-width:1024px){.bottom{grid-template-columns:minmax(0,2fr) minmax(0,3fr);gap:var(--s5);margin-top:var(--s5)}}
+.guard h3,.logc h3{font-size:16px;display:flex;justify-content:space-between;gap:var(--s2);align-items:center;margin-bottom:var(--s3)}
+.guard .who{font-size:14px;margin-bottom:var(--s3);word-break:break-word}
+.checks li{display:grid;grid-template-columns:24px 1fr;gap:var(--s1) var(--s2);padding:var(--s2) 0;border-top:1px solid var(--border);font-size:14px}
+.checks .ic{font:600 14px/1.7 var(--mono)}
+.checks .ok .ic{color:var(--muted)}
+.checks .bad .ic,.checks .bad .k{color:var(--error)}
+.checks .v{grid-column:2;font:400 12px/1.7 var(--mono);color:var(--muted);word-break:break-word}
+.guard .reason{font-size:14px;color:var(--error);margin-bottom:var(--s2)}
+.guard .foot{font-size:12px;color:var(--muted);margin-top:var(--s3)}
+.log{background:var(--bg);border:1px solid var(--border);border-radius:var(--r-md);padding:var(--s4);font:400 12px/1.7 var(--mono);
+  max-height:360px;overflow-y:auto;white-space:pre-wrap;word-break:break-word;color:var(--muted)}
+.log .l-warn{color:var(--warn)}
+.log .l-err{color:var(--error)}
+.log .l-txt{color:var(--text)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="top">
+    <div class="l">
+      <a class="logo" href="/monitor">noob<b>_</b>dev</a>
+      <span class="muted num" style="font-size:14px">/monitor</span>
+    </div>
+    <div class="r">
+      <span class="paper paper-solid">PAPER · เงินจำลอง</span>
+      <span class="tag" id="live-tag"><span class="dot" id="live-dot" aria-hidden="true"></span> <span id="clock">--:--:--</span></span>
+    </div>
+  </div>
+
+  <div class="card hero" aria-live="polite">
+    <div class="hero-top">
+      <div>
+        <span class="label" id="round-label">&gt; รอรับข้อมูล</span>
+        <h3 id="step-title">กำลังโหลด…</h3>
+        <p class="sub" id="step-sub"></p>
+      </div>
+      <button class="btn btn-primary" id="run-btn" disabled>รันรอบนี้เลย</button>
+    </div>
+    <ol class="pipe" id="pipe" aria-label="ขั้นตอนของบอท"></ol>
+    <div class="meta muted">
+      <span>รอบล่าสุด <span class="num" id="last-run">–</span></span>
+      <span>รอบถัดไป <span class="num" id="next-run">–</span></span>
+      <span id="tz-note">เวลาไทย</span>
+    </div>
+    <p class="banner" id="banner" role="status" hidden></p>
+  </div>
+
+  <div class="chips" id="chips" role="group" aria-label="watchlist กดเพื่อเปลี่ยนกราฟ"></div>
+
+  <div class="main">
+    <div class="chart" role="region" aria-label="กราฟราคา (TradingView)">
+      <span class="sym"><span class="tag" id="chart-label">NASDAQ:AAPL</span></span>
+      <div id="tv-host" style="height:100%"></div>
+    </div>
+
+    <div class="card pf">
+      <span class="label">equity · <span id="ccy">usd</span></span> <span class="paper">PAPER</span>
+      <p class="eq num" id="eq">–</p>
+      <p class="muted" style="font-size:14px;margin-bottom:var(--s3)" id="eq-sub"></p>
+      <div class="row"><span>เงินสด <span class="paper">PAPER</span></span><span class="num" id="cash">–</span></div>
+      <div class="row"><span>ปิดแล้ว <span class="paper">PAPER</span></span><span class="num" id="rpnl">–</span></div>
+      <div class="row"><span>ยังไม่ปิด <span class="paper">PAPER</span></span><span class="num" id="upnl">–</span></div>
+      <h4 id="pos-title">position <span class="paper">PAPER</span></h4>
+      <div id="positions"></div>
+    </div>
+  </div>
+
+  <div class="bottom">
+    <div class="card guard">
+      <h3>ระบบกันราคา <span class="tag" id="guard-tag">ยังไม่มีคำสั่ง</span></h3>
+      <div id="guard-body"><p class="muted" style="font-size:14px">ยังไม่มีคำสั่งให้ตรวจ</p></div>
+      <p class="foot" id="guard-foot">ปรับเพดานได้ที่ config/config.yaml</p>
+    </div>
+    <div class="card logc">
+      <h3>log ล่าสุด <span class="label">20 บรรทัด</span></h3>
+      <div class="log" id="log" tabindex="0" aria-label="log ล่าสุด"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var TZ = "Asia/Bangkok";
+  var STEPS = [["fetch", "ดึงราคา"], ["signal", "คำนวณสัญญาณ"], ["risk", "ตรวจความเสี่ยง"], ["order", "ส่งคำสั่งจำลอง"], ["wait", "รอรอบถัดไป"]];
+  var SVG_OPEN = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">';
+  var ICONS = {
+    fetch: SVG_OPEN + '<path d="M12 4v11"/><path d="M7 11l5 5 5-5"/><path d="M5 20h14"/></svg>',
+    signal: SVG_OPEN + '<path d="M3 17l5-6 4 3 8-9"/><path d="M15 5h5v5"/></svg>',
+    risk: SVG_OPEN + '<path d="M12 3l8 3v6c0 4.5-3.2 7.6-8 9-4.8-1.4-8-4.5-8-9V6l8-3z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg>',
+    order: SVG_OPEN + '<path d="M21 3L10 14"/><path d="M21 3l-7 18-4-7-7-4 18-7z"/></svg>',
+    wait: SVG_OPEN + '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
+  };
+  var $ = function (id) { return document.getElementById(id); };
+  var selected = null, shownSymbol = null, lastShownInterval = null, busy = false;
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function fmtTime(iso, withDate) {
+    if (!iso) return "–";
+    var d = new Date(iso);
+    if (isNaN(d)) return "–";
+    var o = { timeZone: TZ, hour12: false, hour: "2-digit", minute: "2-digit", second: "2-digit" };
+    if (withDate) { o.day = "2-digit"; o.month = "short"; }
+    return d.toLocaleString("th-TH", o);
+  }
+  function num(v, dp) {
+    if (v == null || isNaN(v)) return "–";
+    return Number(v).toLocaleString("en-US", { minimumFractionDigits: dp == null ? 2 : dp, maximumFractionDigits: dp == null ? 2 : dp });
+  }
+  function signed(v) {
+    if (v == null || isNaN(v)) return "–";
+    return (v > 0 ? "+" : v < 0 ? "−" : "") + num(Math.abs(v));
+  }
+  function pct(v, dp) { return num(v * 100, dp == null ? 2 : dp) + "%"; }
+
+  function tickClock() {
+    $("clock").textContent = new Date().toLocaleTimeString("th-TH", { timeZone: TZ, hour12: false });
+  }
+
+  function renderTV(tv, interval) {
+    var host = $("tv-host");
+    $("chart-label").textContent = tv;
+    var iv = interval === "1d" ? "D" : String(interval || "D").replace(/m$/, "");
+    host.textContent = "";
+    var box = el("div", "tradingview-widget-container");
+    box.appendChild(el("div", "tradingview-widget-container__widget"));
+    var s = document.createElement("script");
+    s.src = "https://s3.tradingview.com/external-embedding/embed-widget-advanced-chart.js";
+    s.async = true;
+    s.text = JSON.stringify({
+      autosize: true, symbol: tv, interval: iv, timezone: TZ, theme: window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark",
+      style: "1", locale: "th_TH", allow_symbol_change: false, hide_side_toolbar: true, support_host: "https://www.tradingview.com"
+    });
+    box.appendChild(s);
+    host.appendChild(box);
+    shownSymbol = tv;
+  }
+
+  function renderPipe(d) {
+    var pipe = $("pipe"), step = d.step || {};
+    pipe.textContent = "";
+    var idx = step.index || (d.running ? 1 : 5);
+    STEPS.forEach(function (st, i) {
+      var li = el("li", i + 1 < idx ? "done" : i + 1 === idx ? "on" : "");
+      li.appendChild(el("span", "bar"));
+      var ic = el("span", "ic");
+      ic.innerHTML = ICONS[st[0]];  // constant inline SVG (same paths as icon-step-*.svg), no user data
+      li.appendChild(ic);
+      li.appendChild(el("span", "n", "0" + (i + 1)));
+      li.appendChild(el("span", "t", st[1]));
+      pipe.appendChild(li);
+    });
+    pipe.setAttribute("aria-label", "ขั้นตอน ขั้นที่ " + idx + " จาก 5");
+  }
+
+  function renderHero(d) {
+    var step = d.step || {}, round = d.round || {};
+    var title = step.label || (d.running ? "กำลังทำงาน" : "รอรอบถัดไป");
+    if (step.symbol) title += " · " + step.symbol;
+    $("step-title").textContent = d.status_file_found ? title : "ยังไม่มีข้อมูลจากบอท";
+    $("round-label").textContent = "> " + (round.id != null ? "รอบ #" + round.id + " · " : "") + (d.running ? "กำลังทำ" : "ว่าง");
+    var sub = [];
+    if (step.symbol_total) sub.push("หุ้นตัวที่ " + step.symbol_index + "/" + step.symbol_total);
+    if (round.started_at && d.running) sub.push("เริ่มรอบ " + fmtTime(round.started_at));
+    if (step.detail) sub.push(step.detail);
+    $("step-sub").textContent = sub.join(" · ");
+    renderPipe(d);
+    $("last-run").textContent = fmtTime(d.last_run_at, true);
+    $("next-run").textContent = fmtTime(d.next_run_at, true);
+    $("tz-note").textContent = "เวลาไทย" + (d.every_minutes ? " · ทุก " + d.every_minutes + " นาที" : "");
+
+    var dot = $("live-dot"), b = $("banner");
+    dot.className = "dot";
+    b.hidden = true; b.className = "banner";
+    if (!d.status_file_found) {
+      dot.classList.add("off"); b.hidden = false; b.className = "banner err"; b.textContent = "ยังไม่เจอ data/status.json — บอทยังไม่เคยรัน หรือ scheduler ยังไม่เปิด";
+    } else if (!d.online) {
+      dot.classList.add("off"); b.hidden = false; b.className = "banner err"; b.textContent = "ออฟไลน์ — ไม่มี heartbeat จาก scheduler เกิน 90 วินาที";
+    } else if (d.stale) {
+      dot.classList.add("stale"); b.hidden = false; b.className = "banner"; b.textContent = "สถานะค้าง — รอบนี้ไม่อัปเดตเกิน 5 นาที บอทน่าจะล่ม";
+    } else if (d.heartbeat_age_seconds != null && d.heartbeat_age_seconds > 45) {
+      dot.classList.add("stale"); b.hidden = false; b.className = "banner"; b.textContent = "ข้อมูลค้าง — ไม่อัปเดตมา " + Math.round(d.heartbeat_age_seconds) + " วินาที";
+    } else {
+      dot.classList.add("live");
+    }
+
+    var btn = $("run-btn");
+    btn.disabled = busy || !d.can_run;
+    if (d.running) { btn.textContent = "กำลังรันรอบ" + (round.id != null ? " #" + round.id : "") + "…"; btn.setAttribute("aria-busy", "true"); }
+    else { btn.textContent = "รันรอบนี้เลย"; btn.removeAttribute("aria-busy"); }
+    if (d.is_live_config) { btn.disabled = true; btn.textContent = "ปิดไว้ (config เป็น live)"; }
+  }
+
+  function renderChips(d) {
+    var box = $("chips"), wl = d.watchlist || [];
+    box.textContent = "";
+    if (!wl.length) { box.appendChild(el("p", "empty", "ยังไม่มีสัญญาณ")); return; }
+    if (!selected || !wl.some(function (w) { return w.symbol === selected; })) selected = wl[0].symbol;
+    wl.forEach(function (w) {
+      var b = el("button");
+      b.type = "button";
+      b.setAttribute("aria-pressed", w.symbol === selected ? "true" : "false");
+      b.dataset.sym = w.symbol;
+      var r1 = el("span", "row"), r2 = el("span", "row");
+      r1.appendChild(el("span", "s", w.symbol));
+      var sig = w.blocked ? "✕ blocked" : w.error ? "error" : w.signal === "BUY" ? "▲ buy" : w.signal === "SELL" ? "▼ sell" : w.signal ? w.signal.toLowerCase() : "–";
+      var cls = w.blocked || w.error ? "sig-blocked" : w.signal === "BUY" ? "sig-buy" : w.signal === "SELL" ? "sig-sell" : "sig-hold";
+      r1.appendChild(el("span", "tag " + cls, sig));
+      r2.appendChild(el("span", "p", w.price != null ? num(w.price) : "–"));
+      var c = el("span", "c" + (w.percent_change < 0 ? " neg" : ""), w.percent_change != null ? (w.percent_change >= 0 ? "+" : "−") + num(Math.abs(w.percent_change)) + "%" : "");
+      r2.appendChild(c);
+      b.appendChild(r1); b.appendChild(r2);
+      b.addEventListener("click", function () { selected = w.symbol; renderChips(window.__last); syncChart(window.__last); });
+      box.appendChild(b);
+    });
+  }
+
+  function syncChart(d) {
+    var wl = d.watchlist || [], w = wl.filter(function (x) { return x.symbol === selected; })[0];
+    var tv = w && w.tv_symbol ? w.tv_symbol : "NASDAQ:AAPL";
+    var iv = d.round && d.round.interval || "1d";
+    if (tv !== shownSymbol || iv !== lastShownInterval) { lastShownInterval = iv; renderTV(tv, iv); }
+  }
+
+  function rowEl(left, right, rightCls) {
+    var r = el("div", "row");
+    var l = el("span", "num");
+    if (typeof left === "string") l.textContent = left; else l.appendChild(left);
+    r.appendChild(l);
+    r.appendChild(el("span", "num" + (rightCls || ""), right));
+    return r;
+  }
+  function renderPortfolio(d) {
+    var p = d.portfolio, box = $("positions");
+    box.textContent = "";
+    if (!p) {
+      ["eq", "cash", "rpnl", "upnl"].forEach(function (k) { $(k).textContent = "–"; $(k).classList.remove("neg"); });
+      $("eq-sub").textContent = "บอทยังไม่เคยรัน";
+      return;
+    }
+    $("ccy").textContent = (p.currency || "usd").toLowerCase();
+    $("eq").textContent = num(p.equity);
+    var up = p.pnl_total >= 0;
+    $("eq-sub").textContent = (up ? "▲ " : "▼ ") + (p.return_pct >= 0 ? "+" : "−") + num(Math.abs(p.return_pct)) + "% จากทุน " + num(p.initial_capital, 0) +
+      (p.drawdown_pct != null ? " · drawdown " + num(p.drawdown_pct, 1) + "%" : "");
+    $("cash").textContent = num(p.cash);
+    $("rpnl").textContent = signed(p.realized_pnl); $("rpnl").classList.toggle("neg", p.realized_pnl < 0);
+    $("upnl").textContent = signed(p.unrealized_pnl); $("upnl").classList.toggle("neg", p.unrealized_pnl < 0);
+    $("pos-title").firstChild.textContent = "position " + p.open_positions + (p.max_open_positions ? "/" + p.max_open_positions : "") + " ";
+    (p.positions || []).forEach(function (ps) {
+      var left = el("span", "");
+      left.appendChild(document.createTextNode(ps.symbol + " ×" + ps.quantity + " "));
+      left.appendChild(el("span", "muted", "@" + num(ps.entry_price)));
+      box.appendChild(rowEl(left, signed(ps.unrealized_pnl), ps.unrealized_pnl < 0 ? " neg" : ""));
+    });
+    if (!(p.positions || []).length) box.appendChild(el("p", "muted", "ไม่มี position ที่เปิดอยู่"));
+  }
+
+  function renderGuard(d) {
+    var g = d.guard || {}, rec = g.recent || [], last = g.last || rec[rec.length - 1];
+    var body = $("guard-body"), tag = $("guard-tag");
+    body.textContent = "";
+    var today = g.today || {};
+    if (!last) {
+      tag.textContent = "ยังไม่มีคำสั่ง"; tag.className = "tag";
+      body.appendChild(el("p", "muted", "ยังไม่มีคำสั่งให้ตรวจ"));
+    } else {
+      tag.textContent = last.allowed ? "ผ่าน" : "ยกเลิก";
+      tag.className = "tag " + (last.allowed ? "" : "sig-blocked");
+      var who = el("p", "who");
+      who.appendChild(el("span", "num", last.symbol + " " + last.side + " ×" + last.quantity + " @ " + num(last.price) + " "));
+      who.appendChild(el("span", "paper", "PAPER"));
+      who.appendChild(document.createElement("br"));
+      who.appendChild(el("span", "muted", "รอบ #" + last.round_id + " · " + fmtTime(last.at) + (last.alerted ? " · แจ้ง Discord แล้ว" : "")));
+      body.appendChild(who);
+      if (!last.allowed && last.reason) body.appendChild(el("p", "reason", last.reason));
+      var ul = el("ul", "checks");
+      (last.checks || []).forEach(function (c) {
+        var li = el("li", c.ok ? "ok" : "bad");
+        li.appendChild(el("span", "ic", c.ok ? "✓" : "✕"));
+        li.appendChild(el("span", "k", c.label));
+        var isPct = c.key === "deviation" || c.key === "jump";
+        var v = isPct ? pct(c.value) + " · เพดาน " + pct(c.limit) :
+          c.key === "freshness" ? num(c.value, 1) + " · เพดาน " + num(c.limit, 0) : num(c.value) + " · เพดาน " + num(c.limit, 0);
+        li.appendChild(el("span", "v", v));
+        ul.appendChild(li);
+      });
+      body.appendChild(ul);
+    }
+    $("guard-foot").textContent = "วันนี้ยกเลิก " + (today.blocked || 0) + " · ผ่าน " + (today.passed || 0) + " · ปรับเพดานได้ที่ config/config.yaml";
+  }
+
+  function renderLog(d) {
+    var box = $("log"), logs = d.logs || [];
+    var atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 8;
+    box.textContent = "";
+    logs.forEach(function (l) {
+      var line = el("div");
+      line.appendChild(document.createTextNode(fmtTime(l.ts) + " "));
+      var lv = (l.level || "").toUpperCase();
+      line.appendChild(el("span", lv === "ERROR" ? "l-err" : lv === "WARN" ? "l-warn" : "l-txt", (lv || "INFO").padEnd(5) + " " + (l.text || "")));
+      box.appendChild(line);
+    });
+    if (!logs.length) box.textContent = "ยังไม่มี log";
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  }
+
+  function render(d) {
+    window.__last = d;
+    renderHero(d); renderChips(d); syncChart(d); renderPortfolio(d); renderGuard(d); renderLog(d);
+  }
+
+  function poll() {
+    fetch("/api/monitor/status", { cache: "no-store" })
+      .then(function (r) { if (!r.ok) throw new Error(r.status); return r.json(); })
+      .then(render)
+      .catch(function () {
+        var b = $("banner"); b.hidden = false; b.className = "banner err";
+        b.textContent = "ติดต่อเซิร์ฟเวอร์ไม่ได้ — จะลองใหม่ใน 3 วินาที";
+        $("live-dot").className = "dot off";
+      });
+  }
+
+  $("run-btn").addEventListener("click", function () {
+    if (busy) return;
+    busy = true; this.disabled = true;
+    fetch("/api/monitor/run-now", { method: "POST" })
+      .then(function (r) {
+        var b = $("banner");
+        if (r.status === 409) { b.hidden = false; b.className = "banner"; b.textContent = "มีรอบรันอยู่แล้ว รอให้จบก่อนนะ"; }
+        else if (r.status === 403) { b.hidden = false; b.className = "banner err"; b.textContent = "ปฏิเสธ: config เป็น live ปุ่มนี้ใช้ได้เฉพาะ paper"; }
+        else if (!r.ok) { b.hidden = false; b.className = "banner err"; b.textContent = "สั่งรันไม่สำเร็จ (" + r.status + ")"; }
+      })
+      .catch(function () { var b = $("banner"); b.hidden = false; b.className = "banner err"; b.textContent = "สั่งรันไม่สำเร็จ ติดต่อเซิร์ฟเวอร์ไม่ได้"; })
+      .then(function () { busy = false; poll(); });
+  });
+
+  tickClock(); setInterval(tickClock, 1000);
+  poll(); setInterval(poll, 3000);
+})();
+</script>
+</body>
+</html>

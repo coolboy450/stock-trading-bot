@@ -47,7 +47,11 @@ def build_engine(settings, db, provider):
     notifier = RecordingNotifier()
     alerts = AlertManager(settings.alerts, notifier, db)
     broker = PaperBroker(CostModel.from_settings(settings.execution))
-    return TradingEngine(settings, db, provider, broker, alerts), notifier
+    engine = TradingEngine(settings, db, provider, broker, alerts)
+    if isinstance(provider, FrameProvider):
+        # replaying history: "now" follows the newest served bar, so the price guard sees fresh data
+        engine.clock = lambda: provider.frames["AAA"].index[provider.cursor - 1].to_pydatetime() + timedelta(hours=1)
+    return engine, notifier
 
 
 def replay(engine, provider, start_cursor, end_cursor):
