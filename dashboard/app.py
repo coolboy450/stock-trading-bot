@@ -10,15 +10,19 @@ from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from loguru import logger
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
+from backtesting.review import next_review_at
 from config.settings import Settings
 from database import repository as repo
 from database.models import AlertLog, DailySummary, Order, Portfolio, Signal, SignalType, Stock, Trade, TradeStatus
 from database.session import Database
+from risk.brake import EmergencyBrake
+from monitoring.review_store import ReviewStore, effective_strategy
 from monitoring.status import STALE_AFTER_SECONDS, STEPS, guard_config, read_status, status_path, tv_symbol
 
 STATIC = Path(__file__).parent / "static"
@@ -50,15 +54,34 @@ def _paper_cycle_runner(settings: Settings, db: Database) -> Callable[[], None]:
     return run
 
 
+def _paper_review_runner(settings: Settings, db: Database, store: ReviewStore) -> Callable[[], None]:
+    """Default "review now" action: the weekly walk-forward exam. Only writes JSON overrides (paper only)."""
+
+    def run() -> None:
+        from backtesting.review import run_strategy_review
+        from monitoring.alerts import AlertManager
+        from monitoring.notifier import build_notifier
+
+        run_strategy_review(settings, db, AlertManager(settings.alerts, build_notifier(settings.alerts), db), store,
+                            trigger="manual")
+
+    return run
+
+
 def create_app(
     settings: Settings, db: Database | None = None, run_cycle: Callable[[], None] | None = None,
-    status_file: Path | None = None,
+    status_file: Path | None = None, run_review: Callable[[], None] | None = None,
+    review_store: ReviewStore | None = None, brake: EmergencyBrake | None = None,
 ) -> FastAPI:
-    """``run_cycle`` / ``status_file`` can be injected (tests); defaults are the paper runner and config path."""
+    """``run_cycle`` / ``run_review`` / ``status_file`` / stores can be injected (tests); defaults are the paper runners."""
     db = db or Database(settings.database.url)
     status_file = status_file or status_path(settings)
     run_cycle = run_cycle or _paper_cycle_runner(settings, db)
+    review_store = review_store or ReviewStore.from_settings(settings)
+    brake = brake or EmergencyBrake.from_settings(settings)
+    run_review = run_review or _paper_review_runner(settings, db, review_store)
     run_lock = threading.Lock()
+    review_lock = threading.Lock()
     app = FastAPI(title="Stock Bot Dashboard", version="1.0")
     pf_name = settings.execution.portfolio_name
     app.mount("/static", StaticFiles(directory=STATIC), name="static")  # favicon + step icons (read-only)
@@ -104,8 +127,29 @@ def create_app(
         data["can_run"] = not settings.is_live and not (running and not stale) and not run_lock.locked()
         data.setdefault("guard", {})["config"] = guard_config(settings)  # always the live config values
         data["is_live_config"] = settings.is_live  # True = run-now refuses
+        items = {i.symbol: i for i in settings.watchlist}
+        pending = review_store.pending()
         for w in data.get("watchlist", []):
             w.setdefault("tv_symbol", tv_symbol(w["symbol"]))
+            item = items.get(w["symbol"])
+            if item is not None:  # the strategy in force now (a review may have changed it after the last round)
+                w["strategy"] = effective_strategy(settings, review_store, item)
+            if w["symbol"] in pending:
+                w["pending_strategy"] = pending[w["symbol"]].get("to")
+        data["brake"] = brake.state()
+        review = review_store.last_review()
+        next_at = next_review_at(settings.strategy_review)
+        review_running = review_store.is_running() or review_lock.locked()
+        data["review"] = {
+            "enabled": settings.strategy_review.enabled, "last": review, "pending": pending,
+            "next_at": next_at.isoformat(timespec="seconds") if next_at else None,
+            "running": review_running, "can_run": not settings.is_live and not review_running,
+            "config": {"train_months": settings.strategy_review.train_months,
+                       "test_months": settings.strategy_review.test_months,
+                       "min_improvement_pct": settings.strategy_review.min_improvement_pct,
+                       "min_test_trades": settings.strategy_review.min_test_trades,
+                       "cooldown_weeks": settings.strategy_review.cooldown_weeks},
+        }
         return data
 
     @app.get("/monitor", response_class=HTMLResponse)
@@ -143,6 +187,36 @@ def create_app(
             run_lock.release()
             raise
         return {"accepted": True, "paper": True, "next_round_id": int(current.get("round", {}).get("id", 0)) + 1}
+
+    @app.post("/api/monitor/review-now", status_code=202)
+    def monitor_review_now() -> dict:
+        """Run the strategy review in the background. Refused while one is running (double-click guard) or live."""
+        if settings.is_live:
+            raise HTTPException(403, "review-now is paper-only; config is in live mode")
+        if not review_lock.acquire(blocking=False):
+            raise HTTPException(409, "a strategy review is already running")
+        if review_store.is_running():  # started by the scheduler process
+            review_lock.release()
+            raise HTTPException(409, "a strategy review is already running")
+
+        def work() -> None:
+            try:
+                run_review()
+            except Exception:
+                logger.exception("Manual strategy review failed")
+            finally:
+                review_lock.release()
+
+        try:
+            threading.Thread(target=work, name="monitor-review-now", daemon=True).start()
+        except Exception:
+            review_lock.release()
+            raise
+        return {"accepted": True, "paper": True}
+
+    @app.get("/api/strategy-history")
+    def strategy_history(limit: int = Query(50, le=500)) -> list[dict]:
+        return review_store.history(limit)
 
     @app.get("/api/health")
     def health() -> dict:

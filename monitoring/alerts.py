@@ -124,6 +124,19 @@ class AlertManager:
             key=f"dd:{portfolio}",
         )
 
+    def emergency_brake(self, active: bool, drawdown_pct: float, trigger_pct: float, release_pct: float,
+                        *, portfolio: str = "", manual: bool = False) -> bool:
+        """Brake switched on/off (sent to every channel, no cooldown: state changes are rare)."""
+        if active:
+            return self.send(
+                "EMERGENCY_BRAKE", f"[PAPER] เบรกฉุกเฉินทำงาน {portfolio}".strip(),
+                f"drawdown {drawdown_pct:.2%} ≥ {trigger_pct:.0%} → หยุดเปิด position ใหม่ "
+                f"(ขาย/stop-loss ยังทำงานปกติ)\nปลดอัตโนมัติเมื่อ drawdown < {release_pct:.0%} หรือสั่ง: python main.py resume",
+                "ERROR")
+        how = "ปลดด้วยมือ (resume)" if manual else f"drawdown {drawdown_pct:.2%} < {release_pct:.0%}"
+        return self.send("EMERGENCY_BRAKE", f"[PAPER] ปลดเบรกฉุกเฉิน {portfolio}".strip(),
+                         f"{how} → เปิด position ใหม่ได้อีกครั้ง", "SUCCESS")
+
     def risk_block(self, symbol: str, reason: str) -> None:
         self.send("RISK", f"Entry blocked: {symbol}", reason, "WARNING", key=f"risk:{reason[:40]}")
 

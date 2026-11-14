@@ -46,6 +46,17 @@ def end_of_day_job(engine: TradingEngine) -> None:
         engine.alerts.error("end_of_day_job", exc)
 
 
+def strategy_review_job(engine: TradingEngine, trigger: str = "schedule") -> None:
+    """Saturday exam: walk-forward backtest of all strategies, apply allowed changes, tell Discord (paper only)."""
+    from backtesting.review import run_strategy_review
+
+    try:
+        run_strategy_review(engine.settings, engine.db, engine.alerts, engine.review_store, trigger=trigger)
+    except Exception as exc:
+        logger.exception("Strategy review failed")
+        engine.alerts.error("strategy_review_job", exc)
+
+
 def build_scheduler(engine: TradingEngine) -> BlockingScheduler:
     cfg = engine.settings.scheduler
     scheduler = BlockingScheduler(
@@ -66,6 +77,15 @@ def build_scheduler(engine: TradingEngine) -> BlockingScheduler:
         )
     if not scheduler.get_jobs():
         raise RuntimeError("No scheduler jobs enabled (scheduler.intraday / scheduler.end_of_day)")
+    rev = engine.settings.strategy_review
+    if rev.enabled:
+        scheduler.add_job(
+            strategy_review_job,
+            CronTrigger(day_of_week=rev.day_of_week, hour=rev.hour, minute=rev.minute, timezone=rev.timezone),
+            args=[engine], id="strategy_review",
+            name=f"strategy review {rev.day_of_week} {rev.hour:02d}:{rev.minute:02d} {rev.timezone}",
+            misfire_grace_time=3600,
+        )
     _wire_status(scheduler, engine)
     return scheduler
 

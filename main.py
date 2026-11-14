@@ -13,6 +13,8 @@ Examples::
     python main.py run-once
     python main.py schedule
     python main.py dashboard
+    python main.py review          # weekly strategy exam now (walk-forward)
+    python main.py resume          # release the emergency brake
 """
 
 from __future__ import annotations
@@ -262,6 +264,40 @@ def cmd_close(args, settings: Settings, db: Database) -> None:
     print(engine.close_position(args.symbol.upper()))
 
 
+def cmd_resume(args, settings: Settings, db: Database) -> None:
+    """Manually release the emergency brake (paper only; new positions allowed again)."""
+    from risk.brake import EmergencyBrake
+
+    engine = _engine(settings, db, "synthetic", read_only=True)
+    with db.session() as s:
+        pf = engine.portfolio(s)
+        engine.revalue(s, pf)
+        drawdown = pf.drawdown_pct
+    brake = EmergencyBrake.from_settings(settings)
+    if not brake.resume(drawdown):
+        print("เบรกฉุกเฉินไม่ได้ทำงานอยู่ ไม่ต้องปลด")
+        return
+    cfg = settings.emergency_brake
+    engine.alerts.emergency_brake(False, drawdown, cfg.trigger_drawdown_pct, cfg.release_drawdown_pct,
+                                  portfolio=settings.execution.portfolio_name, manual=True)
+    print(f"ปลดเบรกฉุกเฉินแล้ว (drawdown ตอนนี้ {drawdown:.2%}) - เปิด position ใหม่ได้ (PAPER)")
+
+
+def cmd_review(args, settings: Settings, db: Database) -> None:
+    """Run the weekly strategy review now (walk-forward, paper only)."""
+    from backtesting.review import format_review, run_strategy_review
+
+    db.create_all()
+    engine = _engine(settings, db, "synthetic", read_only=True)
+    result = run_strategy_review(settings, db, None if args.no_alert else engine.alerts, engine.review_store,
+                                 trigger="cli")
+    if result is None:
+        print("มีการสอบกลยุทธ์รันอยู่แล้ว")
+        return
+    print(format_review(result, settings.strategy_review))
+    print("\n" + DISCLAIMER)
+
+
 def cmd_test_alert(args, settings: Settings, db: Database) -> None:
     from monitoring.alerts import AlertManager
     from monitoring.notifier import build_notifier
@@ -432,6 +468,12 @@ def build_parser() -> argparse.ArgumentParser:
     sp = sub.add_parser("close", help="manually close a position at the last stored price")
     sp.add_argument("symbol")
     sp.set_defaults(func=cmd_close)
+
+    sub.add_parser("resume", help="release the emergency brake (paper only)").set_defaults(func=cmd_resume)
+
+    sp = sub.add_parser("review", help="run the weekly strategy review now (walk-forward, paper only)")
+    sp.add_argument("--no-alert", action="store_true", help="do not send the Discord summary")
+    sp.set_defaults(func=cmd_review)
 
     sub.add_parser("test-alert", help="send a test notification").set_defaults(func=cmd_test_alert)
 

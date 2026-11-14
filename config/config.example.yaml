@@ -116,6 +116,27 @@ scheduler:
     minute: 30
     day_of_week: mon-fri
 
+# Weekly walk-forward strategy review (paper only). Changes are saved as overrides in
+# data/strategy_overrides.json (+ history) - config.yaml is never edited by the bot.
+strategy_review:
+  enabled: true
+  day_of_week: sat
+  hour: 10
+  minute: 0
+  timezone: Asia/Bangkok
+  train_months: 12                 # older window, shown for reference only
+  test_months: 6                   # latest window: decisions use this alone
+  min_improvement_pct: 0.20        # candidate score must beat the current one by >= 20%
+  min_test_trades: 3               # trades the candidate needs inside the test window
+  cooldown_weeks: 4                # a symbol cannot change again within 4 weeks
+  strategies: [ma_crossover, rsi, bollinger, breakout, momentum]
+
+# Emergency brake: stop OPENING new positions (sells / stop-loss still work).
+emergency_brake:
+  enabled: true
+  trigger_drawdown_pct: 0.10       # brake on at drawdown >= 10%
+  release_drawdown_pct: 0.05       # auto release when drawdown < 5% (or: python main.py resume)
+
 logging:
   level: INFO
   directory: ./logs

@@ -2,6 +2,8 @@
 config/config.yaml
 data/*.db
 data/*.db-*
+data/*.json
+data/.*.tmp
 logs/
 __pycache__/
 *.pyc

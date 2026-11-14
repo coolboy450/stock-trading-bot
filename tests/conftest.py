@@ -35,6 +35,10 @@ def settings(tmp_path) -> Settings:
             "alerts": {"channels": ["console"], "cooldown_minutes": 0},
             "logging": {"directory": str(tmp_path / "logs")},
             "execution": {"portfolio_name": "test", "initial_capital": 100_000},
+            # keep every JSON state file inside tmp_path: tests must never touch the real data/ folder
+            "strategy_review": {"overrides_file": str(tmp_path / "overrides.json"),
+                                "history_file": str(tmp_path / "history.json")},
+            "emergency_brake": {"state_file": str(tmp_path / "brake.json")},
         }
     )
 
