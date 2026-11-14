@@ -341,6 +341,18 @@ JSON API: `/api/portfolio`, `/api/positions`, `/api/trades`, `/api/orders`, `/ap
 `/api/pnl/daily`, `/api/pnl/monthly`, `/api/daily-summary`, `/api/prices/{symbol}`, `/api/alerts`
 (Dashboard ไม่มีระบบ login — เปิดเฉพาะ `127.0.0.1` หรือวางหลัง reverse proxy ที่มี auth)
 
+**สอบกลยุทธ์รายสัปดาห์** (Paper เท่านั้น, ตั้งค่าที่ `strategy_review`): ทุกวันเสาร์ 10:00 เวลาไทย backtest ทั้ง 5 กลยุทธ์ของทุกหุ้นใน watchlist
+แบบ walk-forward — ช่วงสอบ = 6 เดือนล่าสุด (ตัดสินจากช่วงนี้เท่านั้น), ช่วงฝึก = 12 เดือนก่อนหน้า (แสดงอ้างอิง ไม่ใช้ตัดสิน)
+คะแนน = `return / (1 + max_drawdown)` หลังหักค่าคอม/slippage (ถ้า return ติดลบใช้ `return × (1 + max_drawdown)`)
+เปลี่ยนกลยุทธ์ได้เมื่อ: คะแนนดีกว่าของเดิม ≥ 20% · เทรดในช่วงสอบ ≥ 3 ครั้ง · ไม่ได้เปลี่ยนใน 4 สัปดาห์ · ไม่ได้ถือ position (ถ้าถืออยู่ = "รอเปลี่ยน")
+ผลเก็บเป็น JSON ใน `data/` (git ไม่ track): `strategy_overrides.json` (กลยุทธ์ที่ override + รอเปลี่ยน + ผลสอบล่าสุด) และ `strategy_history.json` (ประวัติทุกครั้งที่เปลี่ยน) — ไม่แก้ `config.yaml`
+สั่งเอง: `python main.py review` หรือปุ่ม "สอบกลยุทธ์ตอนนี้" ใน `/monitor` · สรุปส่ง Discord ทุกครั้ง
+ข้อจำกัด: พารามิเตอร์คงที่ (ไม่ได้ optimise), ช่วงสอบ 6 เดือนมีเทรดน้อย ผลสุ่มได้ง่าย, ผลในอดีตไม่รับประกันอนาคต
+
+**เบรกฉุกเฉิน** (`emergency_brake`): drawdown พอร์ตจำลอง ≥ 10% → หยุดเปิด position ใหม่ (ขาย/stop-loss ยังทำงาน, limit BUY ที่ค้างถูกยกเลิก) + แจ้ง Discord
+ปลดเองเมื่อ drawdown < 5% หรือสั่ง `python main.py resume` (หลัง resume เบรกจะไม่ติดซ้ำจนกว่า drawdown จะลงต่ำกว่า 5% ก่อน; เพดานเดิม `risk.max_drawdown_pct` ยังทำงานเสมอ)
+สถานะเก็บที่ `data/brake.json`
+
 ## 11. Configuration
 
 - YAML: `config/config.yaml` (ถ้าไม่มีจะใช้ `config.example.yaml`) หรือระบุ `-c path.yaml`

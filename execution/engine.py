@@ -40,7 +40,9 @@ from database.session import Database
 from execution.broker import BaseBroker, OrderRequest, OrderResult
 from execution.costs import CostModel
 from monitoring.alerts import AlertManager
+from monitoring.review_store import ReviewStore, effective_strategy
 from monitoring.status import StatusWriter
+from risk.brake import EmergencyBrake
 from risk.manager import AccountState, RiskManager
 from risk.price_guard import PriceContext, PriceGuard
 from strategies import BUY, SELL, BaseStrategy, get_strategy
@@ -101,6 +103,8 @@ class TradingEngine:
         alerts: AlertManager,
         clock: Callable[[], datetime] = utcnow,
         status: StatusWriter | None = None,
+        review_store: ReviewStore | None = None,
+        brake: EmergencyBrake | None = None,
     ) -> None:
         """``clock`` returns naive-UTC "now"; override it to replay history (forward tests)."""
         self.settings = settings
@@ -118,6 +122,8 @@ class TradingEngine:
         self._price_ctx: dict[str, PriceContext] = {}
         self._cycle_blocked: set[str] = set()
         self._round_id = 0
+        self.review_store = review_store or ReviewStore.from_settings(settings)
+        self.brake = brake or EmergencyBrake.from_settings(settings)
 
     # ================================================================ public API
     def run_cycle(
@@ -141,7 +147,10 @@ class TradingEngine:
 
         try:
             with self.alerts.deferred(), self.db.session() as s:
-                self._process_pending_orders(s, self.portfolio(s))
+                pf0 = self.portfolio(s)
+                self.revalue(s, pf0)
+                self.update_brake(pf0.drawdown_pct)
+                self._process_pending_orders(s, pf0)
         except Exception as exc:
             logger.exception("Pending-order processing failed")
             self.alerts.error("pending_orders", exc)
@@ -173,6 +182,7 @@ class TradingEngine:
             report.equity, report.cash, report.drawdown_pct = pf.equity, pf.cash, pf.drawdown_pct
             report.open_positions = len(repo.open_trades(s, pf.id))
         self.alerts.drawdown(self.settings.execution.portfolio_name, report.drawdown_pct, self.settings.risk.max_drawdown_pct)
+        self.update_brake(report.drawdown_pct)
         report.finished_at = self.clock()
         logger.info("=== Trading cycle done: equity={:,.2f} open={} ===", report.equity, report.open_positions)
         return report
@@ -188,6 +198,21 @@ class TradingEngine:
             initial_capital=self.settings.execution.initial_capital,
             currency=currency,
         )
+
+    def update_brake(self, drawdown_pct: float) -> bool:
+        """Feed the drawdown to the emergency brake; alert on every flip. Returns True while the brake is on."""
+        event = self.brake.update(drawdown_pct)
+        cfg, name = self.settings.emergency_brake, self.settings.execution.portfolio_name
+        if event == "ON":
+            logger.warning("EMERGENCY BRAKE ON [PAPER]: drawdown {:.2%} >= {:.0%} - no new positions", drawdown_pct,
+                           cfg.trigger_drawdown_pct)
+            self.alerts.emergency_brake(True, drawdown_pct, cfg.trigger_drawdown_pct, cfg.release_drawdown_pct,
+                                        portfolio=name)
+        elif event == "OFF":
+            logger.info("Emergency brake released: drawdown {:.2%} < {:.0%}", drawdown_pct, cfg.release_drawdown_pct)
+            self.alerts.emergency_brake(False, drawdown_pct, cfg.trigger_drawdown_pct, cfg.release_drawdown_pct,
+                                        portfolio=name)
+        return self.brake.active
 
     def close_position(self, symbol: str, reason: ExitReason = ExitReason.MANUAL) -> str:
         """Manually close an open position at the latest stored price."""
@@ -276,7 +301,7 @@ class TradingEngine:
         return bar_day == now.replace(tzinfo=utc).astimezone(tz).date()
 
     def _strategy_for(self, item: WatchItem) -> BaseStrategy:
-        name = item.strategy or self.settings.strategy.name
+        name = effective_strategy(self.settings, self.review_store, item)  # review override > watchlist > global
         if name not in self._strategies:
             self._strategies[name] = get_strategy(name, self.settings.strategy.params_for(name))
         return self._strategies[name]
@@ -380,6 +405,10 @@ class TradingEngine:
             return "entry order already pending"
         self.status.step("risk", symbol=stock.symbol, detail=f"ตรวจความเสี่ยง {stock.symbol}")
         state = self.account_state(s, pf)
+        if self.update_brake(state.drawdown_pct):
+            reason = f"emergency brake on (drawdown {state.drawdown_pct:.2%})"
+            logger.warning("Entry {} blocked: {}", stock.symbol, reason)
+            return f"blocked: {reason}"
         decision = self.risk.can_open_position(state)
         if not decision.allowed:
             logger.warning("Entry {} blocked: {}", stock.symbol, decision.reason)
@@ -555,6 +584,13 @@ class TradingEngine:
                 order.status = OrderStatus.EXPIRED
                 order.message = "expired (ttl)"
                 logger.info("Order {} expired", order.id)
+                continue
+            if order.side == OrderSide.BUY and self.brake.active:  # never open new positions while braking
+                if order.broker_order_id:
+                    self.broker.cancel_order(order.broker_order_id)
+                order.status = OrderStatus.CANCELLED
+                order.message = "cancelled: emergency brake"
+                logger.info("Order {} cancelled by emergency brake", order.id)
                 continue
             request = OrderRequest(
                 order.stock.symbol, order.side.value, order.quantity, order.order_type.value,

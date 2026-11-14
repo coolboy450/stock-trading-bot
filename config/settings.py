@@ -157,6 +157,39 @@ class SchedulerSettings(BaseModel):
     end_of_day: EndOfDayJob = EndOfDayJob()
 
 
+class StrategyReviewSettings(BaseModel):
+    """Weekly walk-forward strategy review (paper only). Overrides are stored in JSON, never in config.yaml."""
+
+    enabled: bool = True
+    day_of_week: str = "sat"
+    hour: int = Field(10, ge=0, le=23)
+    minute: int = Field(0, ge=0, le=59)
+    timezone: str = "Asia/Bangkok"
+    train_months: int = Field(12, ge=1)  # older window (reported only, never used to decide)
+    test_months: int = Field(6, ge=1)  # most recent window: the decision is made from this alone
+    min_improvement_pct: float = Field(0.20, ge=0)  # candidate score must beat the current by >= 20%
+    min_test_trades: int = Field(3, ge=0)  # candidate needs this many trades in the test window
+    cooldown_weeks: int = Field(4, ge=0)  # no second change within this many weeks
+    strategies: list[str] = ["ma_crossover", "rsi", "bollinger", "breakout", "momentum"]
+    overrides_file: str = "./data/strategy_overrides.json"
+    history_file: str = "./data/strategy_history.json"
+
+
+class EmergencyBrakeSettings(BaseModel):
+    """Stop opening NEW positions when portfolio drawdown gets too deep (exits keep working)."""
+
+    enabled: bool = True
+    trigger_drawdown_pct: float = Field(0.10, gt=0, le=1)  # brake ON at >= 10%
+    release_drawdown_pct: float = Field(0.05, ge=0, le=1)  # brake OFF when back below 5%
+    state_file: str = "./data/brake.json"
+
+    @model_validator(mode="after")
+    def _release_below_trigger(self) -> "EmergencyBrakeSettings":
+        if self.release_drawdown_pct >= self.trigger_drawdown_pct:
+            raise ValueError("emergency_brake.release_drawdown_pct must be < trigger_drawdown_pct")
+        return self
+
+
 class LoggingSettings(BaseModel):
     level: str = "INFO"
     directory: str = "./logs"
@@ -169,6 +202,12 @@ class DashboardSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8000
     status_file: str = "./data/status.json"  # written by the engine, read by /monitor
+
+
+def data_path(value: str) -> Path:
+    """Resolve a file setting relative to the project root."""
+    p = Path(value)
+    return p if p.is_absolute() else PROJECT_ROOT / p
 
 
 def _default_markets() -> dict[str, MarketSettings]:
@@ -200,6 +239,8 @@ class Settings(BaseModel):
     price_guard: PriceGuardSettings = PriceGuardSettings()
     alerts: AlertSettings = AlertSettings()
     scheduler: SchedulerSettings = SchedulerSettings()
+    strategy_review: StrategyReviewSettings = StrategyReviewSettings()
+    emergency_brake: EmergencyBrakeSettings = EmergencyBrakeSettings()
     logging: LoggingSettings = LoggingSettings()
     dashboard: DashboardSettings = DashboardSettings()
 

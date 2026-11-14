@@ -48,6 +48,7 @@ button{font:inherit;color:inherit}
 .btn{display:inline-flex;align-items:center;justify-content:center;height:44px;padding:0 20px;border-radius:var(--r-sm);
   font:500 16px/1 var(--sans);cursor:pointer;border:1px solid transparent;transition:background .2s ease-out,color .2s ease-out}
 .btn-primary{background:var(--accent);color:var(--accent-ink)}
+.btn-secondary{background:transparent;border-color:var(--border);color:var(--text)}
 .btn[disabled]{background:var(--border);color:var(--muted);cursor:not-allowed}
 .dot{display:inline-block;width:8px;height:8px;border-radius:var(--r-pill);background:var(--text)}
 .dot.live{animation:pulse 2s ease-out infinite}
@@ -126,6 +127,21 @@ button{font:inherit;color:inherit}
 .log .l-warn{color:var(--warn)}
 .log .l-err{color:var(--error)}
 .log .l-txt{color:var(--text)}
+.brake{display:flex;flex-wrap:wrap;align-items:center;gap:var(--s2) var(--s3);margin-bottom:var(--s4);padding:var(--s3) var(--s4);
+  border-radius:var(--r-md);background:var(--error);color:var(--accent-ink);font-size:14px}
+.brake[hidden]{display:none}
+.brake b{font:600 14px/1.7 var(--mono);letter-spacing:.04em}
+.chips .st{font:400 12px/1.7 var(--mono);color:var(--muted);word-break:break-word}
+.chips .st.wait{color:var(--warn)}
+.review{margin-top:var(--s4)}
+@media (min-width:1024px){.review{margin-top:var(--s5)}}
+.review h3{font-size:16px;display:flex;justify-content:space-between;gap:var(--s2);align-items:center;flex-wrap:wrap;margin-bottom:var(--s3)}
+.review .head{display:flex;flex-wrap:wrap;gap:var(--s2) var(--s5);font-size:14px;margin-bottom:var(--s3)}
+.review .rows li{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--s1);padding:var(--s3) 0;border-top:1px solid var(--border);font-size:14px}
+@media (min-width:768px){.review .rows li{grid-template-columns:96px minmax(0,1fr)}}
+.review .why{color:var(--muted);word-break:break-word}
+.review .foot{font-size:12px;color:var(--muted);margin-top:var(--s3);word-break:break-word}
+.review .actions{display:flex;flex-wrap:wrap;gap:var(--s3);align-items:center;margin-top:var(--s4)}
 </style>
 </head>
 <body>
@@ -140,6 +156,11 @@ button{font:inherit;color:inherit}
       <span class="paper paper-solid">PAPER · เงินจำลอง</span>
       <span class="tag" id="live-tag"><span class="dot" id="live-dot" aria-hidden="true"></span> <span id="clock">--:--:--</span></span>
     </div>
+  </div>
+
+  <div class="brake" id="brake" role="alert" hidden>
+    <b>เบรกฉุกเฉิน</b>
+    <span id="brake-text"></span>
   </div>
 
   <div class="card hero" aria-live="polite">
@@ -180,6 +201,21 @@ button{font:inherit;color:inherit}
     </div>
   </div>
 
+  <div class="card review" id="review-card">
+    <h3>สอบกลยุทธ์ล่าสุด <span class="paper">PAPER</span></h3>
+    <div class="head muted">
+      <span>สอบเมื่อ <span class="num" id="rv-at">–</span></span>
+      <span>รอบสอบถัดไป <span class="num" id="rv-next">–</span></span>
+      <span id="rv-win"></span>
+    </div>
+    <ul class="rows" id="rv-rows"><li class="muted">ยังไม่เคยสอบ</li></ul>
+    <p class="foot" id="rv-foot"></p>
+    <div class="actions">
+      <button class="btn btn-secondary" id="review-btn" type="button" disabled>สอบกลยุทธ์ตอนนี้</button>
+      <span class="muted" id="rv-msg" role="status" style="font-size:14px"></span>
+    </div>
+  </div>
+
   <div class="bottom">
     <div class="card guard">
       <h3>ระบบกันราคา <span class="tag" id="guard-tag">ยังไม่มีคำสั่ง</span></h3>
@@ -208,7 +244,7 @@ button{font:inherit;color:inherit}
     wait: SVG_OPEN + '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'
   };
   var $ = function (id) { return document.getElementById(id); };
-  var selected = null, shownSymbol = null, lastShownInterval = null, busy = false;
+  var selected = null, shownSymbol = null, lastShownInterval = null, busy = false, reviewBusy = false;
 
   function el(tag, cls, text) {
     var e = document.createElement(tag);
@@ -331,6 +367,9 @@ button{font:inherit;color:inherit}
       var c = el("span", "c" + (w.percent_change < 0 ? " neg" : ""), w.percent_change != null ? (w.percent_change >= 0 ? "+" : "−") + num(Math.abs(w.percent_change)) + "%" : "");
       r2.appendChild(c);
       b.appendChild(r1); b.appendChild(r2);
+      var st = el("span", "st" + (w.pending_strategy ? " wait" : ""), w.strategy || "–");
+      if (w.pending_strategy) st.textContent = (w.strategy || "–") + " → รอเปลี่ยนเป็น " + w.pending_strategy;
+      b.appendChild(st);
       b.addEventListener("click", function () { selected = w.symbol; renderChips(window.__last); syncChart(window.__last); });
       box.appendChild(b);
     });
@@ -426,8 +465,55 @@ button{font:inherit;color:inherit}
     if (atBottom) box.scrollTop = box.scrollHeight;
   }
 
+  var ACTION = { change: "เปลี่ยนแล้ว", pending: "รอเปลี่ยน", keep: "คงเดิม", skip: "ข้าม" };
+  function dayTime(iso) { return iso ? fmtTime(iso, true) : "–"; }
+
+  function renderBrake(d) {
+    var b = d.brake || {}, box = $("brake");
+    box.hidden = !b.active;
+    if (!b.active) return;
+    var dd = d.portfolio && d.portfolio.drawdown_pct != null ? num(d.portfolio.drawdown_pct, 1) + "%" : "–";
+    $("brake-text").textContent = "หยุดเปิด position ใหม่ (ขาย/stop-loss ยังทำงาน) · drawdown " + dd +
+      " · ปลดเมื่อต่ำกว่า " + pct(b.release_drawdown_pct, 0) + " หรือสั่ง python main.py resume";
+  }
+
+  function renderReview(d) {
+    var rv = d.review || {}, last = rv.last, rows = $("rv-rows");
+    $("rv-at").textContent = last ? dayTime(last.at) : "–";
+    $("rv-next").textContent = rv.enabled ? dayTime(rv.next_at) : "ปิดอยู่";
+    $("rv-win").textContent = last && last.symbols && last.symbols[0] && last.symbols[0].windows ?
+      "ช่วงสอบ " + (last.symbols[0].windows.test || "") : "";
+    rows.textContent = "";
+    if (!last) rows.appendChild(el("li", "muted", "ยังไม่เคยสอบ"));
+    else (last.symbols || []).forEach(function (r) {
+      var li = el("li");
+      var left = el("span", "num", r.symbol + " ");
+      left.appendChild(el("span", "tag" + (r.action === "pending" ? " warn" : ""), ACTION[r.action] || r.action));
+      li.appendChild(left);
+      var best = (r.test || {});
+      var parts = Object.keys(best).map(function (k) {
+        var t = best[k];
+        return (k === r.current ? "*" : "") + k + " " + (t.score == null ? "–" : num(t.score * 100)) + "(" + t.trades + ")";
+      });
+      var right = el("span");
+      right.appendChild(el("span", "", r.reason || ""));
+      if (parts.length) { right.appendChild(document.createElement("br")); right.appendChild(el("span", "why num", parts.join(" · "))); }
+      li.appendChild(right);
+      rows.appendChild(li);
+    });
+    var cfg = rv.config || {};
+    $("rv-foot").textContent = last ? "คะแนน = ผลตอบแทนหลังหักค่าคอม ÷ (1 + max drawdown) · * = กลยุทธ์ที่ใช้อยู่ · ตัวเลข(n) = จำนวนเทรดในช่วงสอบ · เกณฑ์: ดีกว่า ≥ " +
+      pct(cfg.min_improvement_pct, 0) + ", เทรด ≥ " + cfg.min_test_trades + ", ห่างจากการเปลี่ยนครั้งก่อน ≥ " + cfg.cooldown_weeks + " สัปดาห์" : "";
+    var btn = $("review-btn");
+    btn.disabled = reviewBusy || !rv.can_run;
+    btn.textContent = rv.running ? "กำลังสอบ…" : "สอบกลยุทธ์ตอนนี้";
+    if (rv.running) btn.setAttribute("aria-busy", "true"); else btn.removeAttribute("aria-busy");
+    if (d.is_live_config) { btn.disabled = true; btn.textContent = "ปิดไว้ (config เป็น live)"; }
+  }
+
   function render(d) {
     window.__last = d;
+    renderBrake(d); renderReview(d);
     renderHero(d); renderChips(d); syncChart(d); renderPortfolio(d); renderGuard(d); renderLog(d);
   }
 
@@ -454,6 +540,22 @@ button{font:inherit;color:inherit}
       })
       .catch(function () { var b = $("banner"); b.hidden = false; b.className = "banner err"; b.textContent = "สั่งรันไม่สำเร็จ ติดต่อเซิร์ฟเวอร์ไม่ได้"; })
       .then(function () { busy = false; poll(); });
+  });
+
+  $("review-btn").addEventListener("click", function () {
+    if (reviewBusy) return;
+    reviewBusy = true; this.disabled = true;
+    var msg = $("rv-msg");
+    msg.textContent = "";
+    fetch("/api/monitor/review-now", { method: "POST" })
+      .then(function (r) {
+        if (r.status === 409) msg.textContent = "มีการสอบรันอยู่แล้ว รอให้จบก่อนนะ";
+        else if (r.status === 403) msg.textContent = "ปฏิเสธ: config เป็น live ปุ่มนี้ใช้ได้เฉพาะ paper";
+        else if (!r.ok) msg.textContent = "สั่งสอบไม่สำเร็จ (" + r.status + ")";
+        else msg.textContent = "เริ่มสอบแล้ว ผลจะขึ้นด้านบนและส่ง Discord";
+      })
+      .catch(function () { msg.textContent = "สั่งสอบไม่สำเร็จ ติดต่อเซิร์ฟเวอร์ไม่ได้"; })
+      .then(function () { reviewBusy = false; poll(); });
   });
 
   tickClock(); setInterval(tickClock, 1000);
