@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED, EVENT_SCHEDULER_STARTED
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
@@ -65,4 +66,21 @@ def build_scheduler(engine: TradingEngine) -> BlockingScheduler:
         )
     if not scheduler.get_jobs():
         raise RuntimeError("No scheduler jobs enabled (scheduler.intraday / scheduler.end_of_day)")
+    _wire_status(scheduler, engine)
     return scheduler
+
+
+HEARTBEAT_ID = "status_heartbeat"
+
+
+def _wire_status(scheduler: BlockingScheduler, engine: TradingEngine) -> None:
+    """Keep ``next_run_at`` in status.json current and refresh it every 30s so /monitor can tell we are alive."""
+    cfg = engine.settings.scheduler
+    every = cfg.intraday.every_minutes if cfg.intraday.enabled else None
+
+    def publish_next_run(_event=None) -> None:
+        times = [j.next_run_time for j in scheduler.get_jobs() if j.id != HEARTBEAT_ID and j.next_run_time]
+        engine.status.set_next_run(min(times) if times else None, every)
+
+    scheduler.add_job(engine.status.flush, IntervalTrigger(seconds=30), id=HEARTBEAT_ID, name="status heartbeat")
+    scheduler.add_listener(publish_next_run, EVENT_SCHEDULER_STARTED | EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)

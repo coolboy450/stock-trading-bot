@@ -5,24 +5,63 @@ Run: ``python main.py dashboard`` then open http://127.0.0.1:8000
 
 from __future__ import annotations
 
+import threading
+from collections.abc import Callable
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 
 from config.settings import Settings
 from database import repository as repo
 from database.models import AlertLog, DailySummary, Order, Portfolio, Signal, SignalType, Stock, Trade, TradeStatus
 from database.session import Database
+from monitoring.status import STALE_AFTER_SECONDS, STEPS, guard_config, read_status, status_path, tv_symbol
 
 STATIC = Path(__file__).parent / "static"
 
 
-def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
+def _paper_cycle_runner(settings: Settings, db: Database) -> Callable[[], None]:
+    """Default "run now" action: one paper cycle with a PaperBroker. Never builds a live broker."""
+
+    def run() -> None:
+        from data.providers import build_provider
+        from execution.broker import PaperBroker
+        from execution.costs import CostModel
+        from execution.engine import TradingEngine
+        from monitoring.alerts import AlertManager
+        from monitoring.notifier import build_notifier
+        from monitoring.status import build_status_writer
+
+        status = build_status_writer(settings)
+        status.attach_logger()
+        try:
+            engine = TradingEngine(
+                settings, db, build_provider(settings.data), PaperBroker(CostModel.from_settings(settings.execution)),
+                AlertManager(settings.alerts, build_notifier(settings.alerts), db), status=status,
+            )
+            engine.run_cycle(trigger="manual")
+        finally:
+            status.detach_logger()
+
+    return run
+
+
+def create_app(
+    settings: Settings, db: Database | None = None, run_cycle: Callable[[], None] | None = None,
+    status_file: Path | None = None,
+) -> FastAPI:
+    """``run_cycle`` / ``status_file`` can be injected (tests); defaults are the paper runner and config path."""
     db = db or Database(settings.database.url)
+    status_file = status_file or status_path(settings)
+    run_cycle = run_cycle or _paper_cycle_runner(settings, db)
+    run_lock = threading.Lock()
     app = FastAPI(title="Stock Bot Dashboard", version="1.0")
     pf_name = settings.execution.portfolio_name
+    app.mount("/static", StaticFiles(directory=STATIC), name="static")  # favicon + step icons (read-only)
 
     def _portfolio(s) -> Portfolio:
         pf = s.scalar(select(Portfolio).where(Portfolio.name == pf_name))
@@ -33,6 +72,77 @@ def create_app(settings: Settings, db: Database | None = None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index() -> str:
         return (STATIC / "index.html").read_text(encoding="utf-8")
+
+    # ------------------------------------------------------------------ /monitor
+    def _monitor_state() -> dict:
+        """status.json + derived flags. Never raises: a missing file means "bot has not run yet"."""
+        data = read_status(status_file)
+        found = data is not None
+        if data is None:
+            data = {
+                "version": 1, "mode": "PAPER", "state": "idle", "round": {"id": 0}, "watchlist": [],
+                "step": {"index": 5, "key": "wait", "label": dict(STEPS)["wait"], "total": len(STEPS),
+                         "symbol": None, "symbol_index": 0, "symbol_total": 0, "detail": "ยังไม่มีข้อมูลจากบอท"},
+                "last_run_at": None, "next_run_at": None, "portfolio": None, "logs": [],
+                "guard": {"last": None, "today": {"passed": 0, "blocked": 0}, "recent": []},
+            }
+        now = datetime.now(timezone.utc)
+        try:
+            age = (now - datetime.fromisoformat(data["updated_at"])).total_seconds()
+        except (KeyError, TypeError, ValueError):
+            age = None
+        running = data.get("state") == "running"
+        stale = running and (age is None or age > STALE_AFTER_SECONDS)  # crashed mid-round
+        data["paper"] = True
+        data["mode"] = "PAPER"
+        data["status_file_found"] = found
+        data["server_time"] = now.isoformat(timespec="seconds")
+        data["heartbeat_age_seconds"] = round(age, 1) if age is not None else None
+        data["online"] = age is not None and age < 90
+        data["stale"] = stale
+        data["running"] = running and not stale
+        data["can_run"] = not settings.is_live and not (running and not stale) and not run_lock.locked()
+        data.setdefault("guard", {})["config"] = guard_config(settings)  # always the live config values
+        data["is_live_config"] = settings.is_live  # True = run-now refuses
+        for w in data.get("watchlist", []):
+            w.setdefault("tv_symbol", tv_symbol(w["symbol"]))
+        return data
+
+    @app.get("/monitor", response_class=HTMLResponse)
+    def monitor_page() -> str:
+        page = STATIC / "monitor.html"
+        if not page.exists():
+            raise HTTPException(404, "monitor.html not built yet")
+        return page.read_text(encoding="utf-8")
+
+    @app.get("/api/monitor/status")
+    def monitor_status() -> JSONResponse:
+        return JSONResponse(_monitor_state(), headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/monitor/run-now", status_code=202)
+    def monitor_run_now() -> dict:
+        """Run one PAPER cycle in the background. Refused while a round is running or in live config."""
+        if settings.is_live:
+            raise HTTPException(403, "run-now is paper-only; config is in live mode")
+        if not run_lock.acquire(blocking=False):
+            raise HTTPException(409, "a round is already running")
+        current = read_status(status_file) or {}
+        if current.get("state") == "running" and not _monitor_state()["stale"]:  # e.g. the scheduler process
+            run_lock.release()
+            raise HTTPException(409, "a round is already running")
+
+        def work() -> None:
+            try:
+                run_cycle()
+            finally:
+                run_lock.release()
+
+        try:
+            threading.Thread(target=work, name="monitor-run-now", daemon=True).start()
+        except Exception:
+            run_lock.release()
+            raise
+        return {"accepted": True, "paper": True, "next_round_id": int(current.get("round", {}).get("id", 0)) + 1}
 
     @app.get("/api/health")
     def health() -> dict:

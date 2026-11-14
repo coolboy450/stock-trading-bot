@@ -112,6 +112,17 @@ class ExecutionSettings(BaseModel):
         return self
 
 
+class PriceGuardSettings(BaseModel):
+    """Sanity checks run before every order (paper). Any failed check cancels the order."""
+
+    enabled: bool = True
+    max_deviation_pct: float = Field(0.02, gt=0, lt=1)  # order price vs latest market price
+    max_daily_jump_pct: float = Field(0.20, gt=0)  # latest price vs previous bar close
+    max_order_value: float = Field(20_000.0, gt=0)  # per BUY order (exits are never trapped by the cap)
+    max_bar_age_days: float = Field(5.0, gt=0)  # 1d interval: last bar older than this = stale
+    max_bar_age_minutes: float = Field(30.0, gt=0)  # intraday intervals
+
+
 class AlertSettings(BaseModel):
     channels: list[Literal["console", "telegram", "discord", "line"]] = ["console"]
     telegram_bot_token: str | None = None
@@ -157,6 +168,7 @@ class LoggingSettings(BaseModel):
 class DashboardSettings(BaseModel):
     host: str = "127.0.0.1"
     port: int = 8000
+    status_file: str = "./data/status.json"  # written by the engine, read by /monitor
 
 
 def _default_markets() -> dict[str, MarketSettings]:
@@ -185,6 +197,7 @@ class Settings(BaseModel):
     strategy: StrategySettings = StrategySettings()
     risk: RiskSettings = RiskSettings()
     execution: ExecutionSettings = ExecutionSettings()
+    price_guard: PriceGuardSettings = PriceGuardSettings()
     alerts: AlertSettings = AlertSettings()
     scheduler: SchedulerSettings = SchedulerSettings()
     logging: LoggingSettings = LoggingSettings()

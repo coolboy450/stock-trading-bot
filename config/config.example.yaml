@@ -80,6 +80,16 @@ execution:
   alpaca_api_key: ${ALPACA_API_KEY:-}
   alpaca_api_secret: ${ALPACA_API_SECRET:-}
 
+# Price guard: checked before EVERY order. Any failure cancels the order,
+# logs the reason, alerts (Discord) and shows on /monitor.
+price_guard:
+  enabled: true
+  max_deviation_pct: 0.02          # order price may differ <= 2% from latest market price
+  max_daily_jump_pct: 0.20         # latest price vs previous bar close; more = bad data
+  max_order_value: 20000           # max value of one BUY order (currency of the portfolio)
+  max_bar_age_days: 5              # 1d interval: newest bar older than this = stale
+  max_bar_age_minutes: 30          # intraday intervals
+
 alerts:
   channels: [console]              # console | telegram | discord | line
   telegram_bot_token: ${TELEGRAM_BOT_TOKEN:-}
@@ -116,3 +126,4 @@ logging:
 dashboard:
   host: 127.0.0.1
   port: 8000
+  status_file: ./data/status.json  # live status for /monitor (engine writes every step)
