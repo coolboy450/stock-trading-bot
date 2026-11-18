@@ -276,7 +276,7 @@ momentum          0.02    0.01      1.18    0.01       6        33.3           1
 
 | ชื่อ | แนวคิด | BUY | SELL | Parameters (default) |
 |---|---|---|---|---|
-| `ma_crossover` | Trend | fast MA ตัดขึ้น slow MA | ตัดลง | `fast_period=20, slow_period=50, ma_type=ema` |
+| `ma_crossover` | Trend | fast MA ตัดขึ้น slow MA (`entry_mode=cross`) หรือ `trend`: fast > slow และ close > fast และ fast สูงกว่า 5 แท่งก่อน (พัก 5 แท่งหลังโดน stop loss) | ตัดลง | `fast_period=20, slow_period=50, ma_type=ema, entry_mode=cross, trend_slope_bars=5, cooldown_bars=5` |
 | `rsi` | Mean reversion | RSI ตัดขึ้นเหนือ oversold | RSI ตัดขึ้นเหนือ overbought | `period=14, oversold=30, overbought=70` |
 | `bollinger` | Mean reversion | close กลับขึ้นเหนือ lower band | close ตัดขึ้น middle/upper | `period=20, std_dev=2.0, exit_at=middle` |
 | `breakout` | Trend (Donchian) | close > high สูงสุด N แท่งก่อนหน้า (+volume filter) | close < low ต่ำสุด M แท่ง | `entry_period=20, exit_period=10, volume_factor=1.0` |

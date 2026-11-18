@@ -114,6 +114,8 @@ class Backtester:
         blocked: list[tuple[datetime, str]] = []
         equity_values: list[float] = []
         bars_in_market = 0
+        cooldown = self.strategy.entry_cooldown_bars
+        last_stop_bar: int | None = None  # bar index of the latest stop-loss exit
         day_start_equity = cfg.initial_capital
         current_day = None
 
@@ -143,7 +145,9 @@ class Backtester:
                 prev_signal = signals[i - 1]
                 if prev_signal == SELL and position is not None:
                     close_position(ts, opens[i], "SIGNAL")
-                elif prev_signal == BUY and position is None:
+                elif prev_signal == BUY and position is None and (
+                    last_stop_bar is None or (i - 1) - last_stop_bar >= cooldown
+                ):
                     equity_now = cash  # flat -> equity == cash
                     state = AccountState(equity_now, cash, peak, day_start_equity, 0)
                     decision = self.risk.can_open_position(state)
@@ -172,6 +176,8 @@ class Backtester:
                     reason, level = hit
                     # Stops fill with slippage; targets fill at the limit price.
                     close_position(ts, level, reason, slip=(reason == "STOP_LOSS"))
+                    if reason == "STOP_LOSS":
+                        last_stop_bar = i
 
             # 3) mark to market at the close
             equity = cash + (position.quantity * closes[i] if position else 0.0)
