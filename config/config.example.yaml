@@ -47,7 +47,9 @@ markets:
 strategy:
   name: ma_crossover               # ma_crossover | rsi | bollinger | breakout | momentum
   params:
-    ma_crossover: {fast_period: 20, slow_period: 50, ma_type: ema}
+    # entry_mode: cross = BUY only on the golden-cross bar (default) | trend = BUY while fast > slow,
+    # close > fast and fast is rising vs trend_slope_bars ago; cooldown_bars wait after a stop-loss (trend only)
+    ma_crossover: {fast_period: 20, slow_period: 50, ma_type: ema, entry_mode: cross, trend_slope_bars: 5, cooldown_bars: 5}
     rsi:          {period: 14, oversold: 30, overbought: 70}
     bollinger:    {period: 20, std_dev: 2.0, exit_at: middle}
     breakout:     {entry_period: 20, exit_period: 10, volume_factor: 1.0}

@@ -47,6 +47,11 @@ class BaseStrategy(ABC):
         """Override to check parameter consistency; raise ``StrategyError``."""
 
     @property
+    def entry_cooldown_bars(self) -> int:
+        """Bars to wait after a stop-loss before re-entering the same symbol (0 = no cooldown)."""
+        return 0
+
+    @property
     @abstractmethod
     def min_bars(self) -> int:
         """Bars needed before the first valid signal."""

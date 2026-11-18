@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from analysis.price_change import compute_changes
 from database.models import (
     Direction,
+    ExitReason,
     Order,
     OrderStatus,
     Portfolio,
@@ -263,6 +264,19 @@ def open_trade_for(session: Session, portfolio_id: int, stock_id: int) -> Trade 
         select(Trade).where(
             Trade.portfolio_id == portfolio_id, Trade.stock_id == stock_id, Trade.status == TradeStatus.OPEN
         )
+    )
+
+
+def last_stop_loss_exit(session: Session, portfolio_id: int, stock_id: int) -> datetime | None:
+    """Exit time of the most recent closed trade in this stock that ended by stop-loss (None if never)."""
+    return session.scalar(
+        select(Trade.exit_time)
+        .where(
+            Trade.portfolio_id == portfolio_id, Trade.stock_id == stock_id,
+            Trade.status == TradeStatus.CLOSED, Trade.exit_reason == ExitReason.STOP_LOSS,
+        )
+        .order_by(Trade.exit_time.desc())
+        .limit(1)
     )
 
 

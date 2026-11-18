@@ -388,6 +388,10 @@ class TradingEngine:
             else:
                 actions.append(self._exit(s, pf, trade, price, ExitReason.SIGNAL, signal))
             signal.acted_on = True
+        elif sig_type == SignalType.BUY and trade is None and not exited and (
+            wait := self._stop_cooldown_left(s, pf, stock, strategy, closed)
+        ) > 0:
+            actions.append(f"cooldown after stop-loss: wait {wait} more bar(s)")
         elif sig_type == SignalType.BUY and trade is None and not exited:
             actions.append(self._enter(s, pf, stock, item, price, strategy.name, signal))
             signal.acted_on = True
@@ -397,6 +401,19 @@ class TradingEngine:
             signal.action_note = "; ".join(a for a in actions if a)
         rep.action = "; ".join(a for a in actions if a) or "-"
         rep.blocked = item.symbol in self._cycle_blocked
+
+    def _stop_cooldown_left(
+        self, s: Session, pf: Portfolio, stock: Stock, strategy: BaseStrategy, closed: pd.DataFrame
+    ) -> int:
+        """Bars still to wait before re-entering after a stop-loss (0 = free to enter)."""
+        cooldown = strategy.entry_cooldown_bars
+        if cooldown <= 0:
+            return 0
+        stopped_at = repo.last_stop_loss_exit(s, pf.id, stock.id)
+        if stopped_at is None:
+            return 0
+        bars_since = int((closed.index.normalize() > pd.Timestamp(stopped_at).normalize()).sum())
+        return max(0, cooldown - bars_since)
 
     def _enter(
         self, s: Session, pf: Portfolio, stock: Stock, item: WatchItem, price: float, strategy: str, signal: Signal
